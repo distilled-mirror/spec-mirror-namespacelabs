@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package namespace.private.sessions.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/private/sessions";
+
+import "google/protobuf/timestamp.proto";
+
+message RequestMetadata {
+    string request_id = 1;
+    string user_agent = 2;
+
+    string       ua_name        = 4;
+    string       ua_version     = 5;
+    string       ua_os          = 6;
+    string       ua_os_version  = 7;
+    string       ua_device      = 8;
+    UaDeviceKind ua_device_kind = 9;
+
+    string ip_address     = 3;
+    int64  ip_city_id     = 10;
+    string ip_city_en     = 11;
+    string ip_country_iso = 12;
+    string ip_country_en  = 13;
+
+    enum UaDeviceKind {
+        UA_DEVICE_KIND_UNKNOWN = 0;
+        UA_DEVICE_MOBILE       = 1;
+        UA_DEVICE_TABLET       = 2;
+        UA_DEVICE_DESKTOP      = 3;
+        UA_DEVICE_BOT          = 4;
+    }
+}
+
+message Session {
+    string                    id                    = 1;  // sid_...
+    string                    owner_id              = 2;  // user_...
+    string                    tenant_id             = 3;  // tenant_...
+    google.protobuf.Timestamp created_at            = 4;
+    google.protobuf.Timestamp expires_at            = 5;
+    google.protobuf.Timestamp invalidated_at        = 6;
+    google.protobuf.Timestamp last_used_at          = 9;
+    RequestMetadata           creation_metadata     = 7;
+    RequestMetadata           invalidation_metadata = 8;
+}

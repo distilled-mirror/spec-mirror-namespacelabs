@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package namespace.cloud.compute.v1beta;
+
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/stdlib/matchers.proto";
+
+// ObservabilityService grants you access to logs and metrics of compute resources.
+// See https://namespace.so/docs/architecture/compute/observability for an overview.
+//
+// ## Access
+//
+// Like ComputeService, ObservabilityService is regionalized for fault tolerance.
+// Each of the regional API endpoints offers a view into the compute instances
+// running at that location. Reach out to Namespace team at support@namespace.so
+// for a list of available regions.
+//
+// ```
+// https://{region}.compute.namespaceapis.com:443
+// # E.g.:
+// https://eu.compute.namespaceapis.com:443
+// https://us.compute.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls to the ObservabilityService require a *tenant token* passed as a Bearer
+// token as part of each call. These are always required.
+//
+// A *tenant token* identifies both the workspace that the call operates on, but
+// may also constrain the set of actions that the caller may do.
+//
+// A *tenant token* can be obtained using the
+// [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta).
+service ObservabilityService {
+    // Stream logs of a particular instance. If `follow` is set, waits for additional logs
+    // as well. If following, and the instance is shut down, the log stream will terminate.
+    //
+    // ### Errors
+    // - If no instance id is provided, a `InvalidArgument` status is returned.
+    // - If the provided id does not match any known instance, a `NotFound` status is returned.
+    rpc StreamInstanceLogs(StreamInstanceLogsRequest) returns (stream LogBlock);
+
+    // Fetches logs of a particular instance (or instances). The instances can still be running.
+    //
+    // A time range is required to use this API. Either the lookups being done have naturally a
+    // range, e.g. last 30 minutes, or you should lookup the time that the instances ran and
+    // pass those to the API.
+    //
+    // If no time range is specified, the serving cost might be too high, and the API server may
+    // elect to reject the call.
+    rpc FetchInstanceLogs(FetchInstanceLogsRequest) returns (FetchInstanceLogsResponse);
+
+    // Fetches diagnostic findings for a particular instance.
+    // Requires the {"instance/o11y/oom", "list"} permission for the instance.
+    //
+    // ### Errors
+    // - If no instance id is provided, an `InvalidArgument` status is returned.
+    rpc FetchInstanceDiagnostics(FetchInstanceDiagnosticsRequest) returns (FetchInstanceDiagnosticsResponse);
+
+    // Fetches egress filtering decisions for a particular instance.
+
+    rpc FetchInstanceEgress(FetchInstanceEgressRequest) returns (FetchInstanceEgressResponse);
+}
+
+message StreamInstanceLogsRequest {
+    string                         instance_id           = 1;
+    bool                           follow                = 2;
+    namespace.stdlib.StringMatcher match_container_names = 3;
+}
+
+message LogBlock {
+    map<string, string> labels = 1;
+
+    // We batch multiple lines from the same container in a single log block to reduce bytes on the wire.
+    // Lines from multiple log blocks can be interleaving.
+    repeated Line lines = 2;
+
+    // XXX will be replaced by LogLine.
+    message Line {
+        google.protobuf.Timestamp timestamp = 1;
+        string                    content   = 2;
+        string                    stream    = 3;  // E.g. stdout, stderr
+    }
+}
+
+message FetchInstanceLogsRequest {
+    bytes pagination_cursor = 1;
+    int32 lines_per_page    = 2;
+
+    namespace.stdlib.StringMatcher  match_instance_ids = 3;
+    namespace.stdlib.TimestampRange timestamp_range    = 4;
+    namespace.stdlib.StringMatcher  match_container_names = 5;
+
+    // Orders log lines by timestamp. A pagination cursor preserves the direction of the first request.
+    Direction direction = 6;
+
+    enum Direction {
+        DIRECTION_UNSPECIFIED = 0;  // Defaults to BACKWARD.
+        DIRECTION_FORWARD     = 1;  // Oldest to newest.
+        DIRECTION_BACKWARD    = 2;  // Newest to oldest.
+    }
+}
+
+message FetchInstanceLogsResponse {
+    bytes            pagination_cursor = 1;
+    repeated LogLine log_line          = 2;
+    int32            retention_days    = 3;
+}
+
+message LogLine {
+    google.protobuf.Timestamp timestamp = 1;
+    string                    content   = 2;
+    string                    stream    = 3;  // E.g. stdout, stderr
+    map<string, string>       labels    = 4;
+    string                    source    = 5;  // E.g. containers, kubernetes, kmsg.
+}
+
+message FetchInstanceDiagnosticsRequest {
+    string instance_id = 1;
+}
+
+message FetchInstanceDiagnosticsResponse {
+    repeated OOMEvent out_of_memory_events = 1;
+}
+
+message OOMEvent {
+    // When the out-of-memory kill was detected.
+    google.protobuf.Timestamp timestamp = 1;
+
+    // Diagnostic information about the process that was killed.
+    string message = 2;
+}
+
+message FetchInstanceEgressRequest {
+    string                          instance_id       = 1;
+    namespace.stdlib.TimestampRange timestamp_range   = 2; // Optional
+    int32                           limit             = 3; // default 20_000
+    bytes                           pagination_cursor = 4;
+}
+
+message FetchInstanceEgressResponse {
+    repeated EgressRecord records           = 1;
+    bytes                 pagination_cursor = 2;
+
+}
+
+message EgressRecord {
+    google.protobuf.Timestamp timestamp    = 1;
+    string                    domain       = 2;
+    string                    rule_match   = 3; // What rule matcher (if any) lead to the action
+    EgressAction              action       = 4;
+    repeated string           answer_ips   = 5;
+}
+
+enum EgressAction {
+    ACTION_UNKNOWN = 0;
+    ALLOW          = 1;
+    DENY           = 2;
+    ADVISORY_DENY  = 3; // Would have been blocked, but allowed because advisory mode enabled
+}

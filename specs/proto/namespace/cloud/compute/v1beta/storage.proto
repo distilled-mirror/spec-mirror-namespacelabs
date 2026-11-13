@@ -1,0 +1,516 @@
+syntax = "proto3";
+
+package namespace.cloud.compute.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/compute/v1beta";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/stdlib/matchers.proto";
+
+// StorageService allows the management of storage used by a tenant.
+// Accessible storage classes include [Cache Volumes](https://namespace.so/docs/architecture/storage/cache-volumes)
+// and Persistent Volumes.
+//
+// ## Access
+//
+// Like ComputeService, StorageService is regionalized for fault tolerance.
+// Reach out to Namespace team at support@namespace.so for a list of available regions.
+//
+// ```
+// https://{region}.compute.namespaceapis.com:443
+// # E.g.:
+// https://eu.compute.namespaceapis.com:443
+// https://us.compute.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls to the StorageService require a *tenant token* passed as a Bearer token as
+// part of each call. These are always required.
+//
+// A *tenant token* identifies both the workspace that the call operates on, but
+// may also constrain the set of actions that the caller may do.
+//
+// A *tenant token* can be obtained using the
+// [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta).
+service StorageService {
+    // Returns a Cache Volume.
+    rpc GetCacheVolume(GetCacheVolumeRequest) returns (GetCacheVolumeResponse);
+
+    // Returns a list of all Cache Volumes used by this tenant.
+    rpc ListCacheVolumes(ListCacheVolumesRequest) returns (ListCacheVolumesResponse);
+
+    // Produces a summary for a Cache Volume tag used by this tenant.
+    rpc GetVolumeTagSummary(GetVolumeTagSummaryRequest) returns (GetVolumeTagSummaryResponse);
+
+    // Produces a summary for each Cache Volume tag used by this tenant.
+    rpc ListVolumeTagSummaries(ListVolumeTagSummariesRequest) returns (ListVolumeTagSummariesResponse);
+
+    // Release all Cache Volumes belonging to a selected `tag`. This operation cannot be undone.
+    //
+    // ### Errors
+    // - If no volume tag is provided, a `InvalidArgument` status is returned.
+    // - If the provided volume tag does not match any known volume tag, a `NotFound` status is returned.
+    rpc DestroyCacheVolume(DestroyCacheVolumeRequest) returns (google.protobuf.Empty);
+
+    // Returns a list of all Persistent Volumes for a given tag.
+    rpc ListPersistentVolumes(ListPersistentVolumesRequest) returns (ListPersistentVolumesResponse);
+
+    // Destroys Persistent Volumes matching the given criteria. Returns the metadata of destroyed volumes.
+    //
+    // At least one matcher (id or tag) must be specified. For safety, the IS_NOT operator is denied.
+    //
+    // ### Errors
+    // - If no matcher is provided, a `InvalidArgument` status is returned.
+    // - If IS_NOT operator is used, a `InvalidArgument` status is returned.
+    // - If no volumes are found matching criteria, a `NotFound` status is returned.
+    rpc DestroyPersistentVolumes(DestroyPersistentVolumesRequest) returns (DestroyPersistentVolumesResponse);
+
+    // Returns details of a Persistent Volume.
+    //
+    // ### Errors
+    // - If the volume does not exist, a `NotFound` status is returned.
+    rpc DescribePersistentVolume(DescribePersistentVolumeRequest) returns (DescribePersistentVolumeResponse);
+
+    // Returns all snapshots of a Persistent Volume.
+    rpc ListPersistentVolumeSnapshots(ListPersistentVolumeSnapshotsRequest) returns (ListPersistentVolumeSnapshotsResponse);
+
+    // Returns details and computed disk-page usage of a specific completed snapshot.
+    // Returns NotFound if the snapshot does not belong to this tenant and tag,
+    // or FailedPrecondition if the snapshot has not completed.
+    rpc DescribePersistentVolumeSnapshot(DescribePersistentVolumeSnapshotRequest) returns (DescribePersistentVolumeSnapshotResponse);
+
+    // Marks a persistent volume snapshot as abandoned. Abandoned snapshots are excluded
+    // when selecting a base snapshot for new volumes. This is useful for marking corrupted
+    // or unwanted snapshots without destroying the volume itself.
+    //
+    // ### Errors
+    // - If the snapshot does not exist, a `NotFound` status is returned.
+    // - If the snapshot is still attached to an instance, a `FailedPrecondition` status is returned.
+    rpc DestroyPersistentVolumeSnapshot(DestroyPersistentVolumeSnapshotRequest) returns (DestroyPersistentVolumeSnapshotResponse);
+}
+
+message GetCacheVolumeRequest {
+    // The unique identifier of this cache volume instance. Within a single cache volume tag,
+    // multiple cache volume generations may exist, and each one is uniquely identified by this id.
+    string id = 1;
+}
+
+message GetCacheVolumeResponse {
+    CacheVolume cache_volume = 1;
+}
+
+message ListCacheVolumesRequest {
+}
+
+message ListCacheVolumesResponse {
+    repeated CacheVolume cache_volume = 1;
+}
+
+message CacheVolume {
+    // The unique identifier of this cache volume instance. Within a single cache volume tag,
+    // multiple cache volume generations may exist, and each one is uniquely identified by this id.
+    string id = 1;
+
+    // Which volume tag does this volume belong to?
+    string tag = 2;
+
+    // Metadata includes the lifecycle timestamps of the volume, as well as any
+    // other values provided at creation time, e.g. the volume size.
+    VolumeMetadata metadata = 3;
+
+    // Volumes are attached once to instances. Attachment captures the lifecycle
+    // of that relationship, including which compute instance the volume was attached to,
+    // when it was attached, and detached.
+    VolumeAttachment attachment = 4;
+}
+
+message VolumeMetadata {
+    // The timestamp of when the volume was created (in UTC).
+    google.protobuf.Timestamp created_at = 1;
+
+    // The timestamp of when the volume was destroyed (in UTC). Not set if the
+    // volume is still alive.
+    google.protobuf.Timestamp destroyed_at = 2;
+
+    // The requested size of the volume in megabytes.
+    uint32 size_mb = 3;
+
+    // Which state is this volume in right now?
+    State state = 4;
+
+    // Why this cache volume generation was started.
+    GenerationReason generation_reason = 5;
+
+    enum State {
+        STATE_UNKNOWN = 0;
+
+        // The volume is currently attached to an instance. Once detached, it gets
+        // stored at rest and becomes a candidate to clone new Cache Volumes from.
+        STATE_IN_USE = 1;
+
+        // This volume is a candidate to clone new Cache Volumes from.
+        STATE_AT_REST = 2;
+
+        // This volume is no longer a candidate to clone new Cache Volumes from.
+        // It has been superceded by a newer candidate.
+        STATE_EXPIRED = 3;
+
+        // This volume was used by an instance, but was not promoted to be a candidate
+        // for future clones (e.g. because that instance's workload did not complete successfully).
+        STATE_ABANDONED = 4;
+    }
+
+    enum GenerationReason {
+        GENERATION_REASON_UNSPECIFIED = 0;
+
+        // The existing snapshot did not have enough free space available to
+        // satisfy the requested volume reservation.
+        RESERVATION_NOT_MET           = 1;
+
+        // The generation was started for another reason.
+        OTHER                         = 2;
+    }
+}
+
+message VolumeAttachment {
+    // The ID of the compute instance that this volume is attached to.
+    // A volume can be attached to at most one instance at a time.
+    // Empty, if the volume is not attached to any compute instance.
+    string attached_to = 1;
+
+    // Deprecated, use `attached_at` instead.
+    google.protobuf.Timestamp last_attached_at = 2 [deprecated = true];
+
+    // Deprecated, use `detached_at` instead.
+    google.protobuf.Timestamp last_detached_at = 3 [deprecated = true];
+
+    // The timestamp of when the volume was attached to the compute instance (in UTC).
+    google.protobuf.Timestamp attached_at = 4;
+
+    // The amount of data already stored on the volume when attaching it in megabytes.
+    uint32 used_mb_when_attached = 5;
+
+    // The timestamp of when the volume was detached from the compute instance (in UTC).
+    // If the volume is still attached to the instance, this field will not be set.
+    google.protobuf.Timestamp detached_at = 6;
+
+    // The amount of data stored on the volume when detaching it in megabytes.
+    // If the volume is still attached to the instance, this field will not be set.
+    uint32 used_mb_when_detached = 7;
+
+    // If unset, Container Image caching is not enabled.
+    ContainerImageCache container_image_cache = 8;
+
+    // Utilization metadata per path in the cache volume.
+    // This data is only populated after the volume is detached.
+    //
+    // To enable path utilization tracking, provide `CacheMetadata` to Namespace by
+    // producing a JSON file inside the Cache Volume at the path `.ns/cache-metadata.json`.
+    map<string, PathUtilization> path_utilization = 9;
+}
+
+message ContainerImageCache {
+    // Whether container image caching is enabled for this volume.
+    bool enabled = 1;
+
+    // The list of container images currently cached in this volume.
+    repeated CachedImage cached_images = 2;
+
+    // The list of container images that were garbage collected from this volume.
+    repeated CachedImage garbage_collected_images = 3;
+}
+
+message CachedImage {
+    // The fully qualified image reference (e.g., "docker.io/library/ubuntu:latest").
+    string image_ref = 1;
+
+    // The namespace that the image belongs to.
+    string namespace = 2;
+
+    // The timestamp of when the image was first cached (in UTC).
+    google.protobuf.Timestamp created_at = 3;
+
+    // The timestamp of when the cached image was last updated (in UTC).
+    google.protobuf.Timestamp updated_at = 4;
+
+    // The size of the image in bytes (unpacked, on-disk size).
+    uint64 size_bytes = 5;
+}
+
+message PathUtilization {
+    // What framework/purpose is this cache path used for?
+    string cache_framework = 1;
+    // A series of bind mounts that have been applied to this cache path.
+    repeated string mount_target = 2;
+    // Name of the system that configured this cache path usage.
+    string source = 3;
+    // The utilization of this path in the Cache Volume in megabytes.
+    uint64 utilization_mb = 4;
+    // When was this usage recorded.
+    google.protobuf.Timestamp created_at = 5;
+}
+
+message GetVolumeTagSummaryRequest {
+    // The name of the tag.
+    string tag = 1;
+}
+
+message GetVolumeTagSummaryResponse {
+    TagSummary summary = 1;
+}
+
+message ListVolumeTagSummariesRequest {
+}
+
+message ListVolumeTagSummariesResponse {
+    repeated TagSummary summaries = 1;
+}
+
+message TagSummary {
+    // The name of the tag.
+    string tag = 1;
+
+    // The requested size of the volume tag in megabytes.
+    uint32 size_mb = 2;
+
+    // A series of all active generations at rest that belong to this tag.
+    // These generations are candidates to clone new Cache Volumes from.
+    // The list is sorted chronologically, starting with the oldest
+    // available generation.
+    //
+    // Deprecated, use `generations` instead.
+    repeated CacheVolume at_rest = 3 [deprecated = true];
+
+    // A series of all generations in use that belong to this tag.
+    // Once detached, these generations get stored at rest and become
+    // candidates to clone new Cache Volumes from.
+    // The list is sorted chronologically, starting with the oldest
+    // available generation.
+    //
+    // Deprecated, use `generations` instead.
+    repeated CacheVolume in_use = 5 [deprecated = true];
+
+    // A series of generations that belong to this tag.
+    // This list contains
+    // - all active generations at rest
+    // - all generations in use
+    // - the latest expired/abandoned generations (potentially incomplete)
+    // The list is sorted chronologically, starting with the oldest
+    // available generation.
+    repeated CacheVolume generations = 6;
+
+    // The timestamp of the first generation (in UTC). Reset when released.
+    // Note: this field is not populated yet.
+    google.protobuf.Timestamp created_at = 4;
+}
+
+message DestroyCacheVolumeRequest {
+    // Required input.
+    string tag = 1;
+}
+
+// Cache metadata allows the user to teach Namespace about how a Cache Volume is used.
+// Namespace persists cache metadata and tracks cache utilization for each configured path.
+// To provide cache metadata to Namespace, produce a JSON file inside the Cache Volume
+// at the path `.ns/cache-metadata.json`.
+message CacheMetadata {
+    // Version of the metadata spec. Currently, only version 1 is supported.
+    uint32 version = 1;
+
+    // The timestamp of when the cache metadata was last updated (in UTC).
+    google.protobuf.Timestamp updated_at = 2;
+
+    // A map of user-requested cache usages. The key is the path in the cache.
+    map<string, CachePathUsage> user_request = 3;
+}
+
+message CachePathUsage {
+    // Name of the system that configured this cache path usage.
+    string source = 1;
+    // What framework/purpose is this cache path used for?
+    string cache_framework = 2;
+    // A series of bind mounts that have been applied to this cache path.
+    repeated string mount_target = 3;
+}
+
+message ListPersistentVolumesRequest {
+    // Filter by tag. If not provided, all persistent volumes are returned.
+    string tag = 1;
+
+    // If a previous response returned a `pagination_cursor`, it can be
+    // specified to continue reading results with the same arguments as the
+    // original call.
+    bytes pagination_cursor = 2;
+
+    // The maximum number of entries to return as part of this ListPersistentVolumes
+    // request. A maximum number of entries may also be specified when
+    // `pagination_cursor` is set.
+    //
+    // We won't return more than `max_entries`, but may return fewer.
+    int64 max_entries = 3;
+
+    // Filter by site/region. If not provided, all sites are queried.
+    namespace.stdlib.StringMatcher site = 4;
+}
+
+message ListPersistentVolumesResponse {
+    repeated PersistentVolume volumes = 1;
+
+    // If set, there are additional results. Pass the same cursor to a
+    // subsequent ListPersistentVolumes call to continue fetching results.
+    bytes pagination_cursor = 2;
+}
+
+message DestroyPersistentVolumesRequest {
+    // Matcher for volume ID. At least one of id or tag must be specified.
+    namespace.stdlib.StringMatcher id = 1;
+    // Matcher for volume tag. At least one of id or tag must be specified.
+    namespace.stdlib.StringMatcher tag = 2;
+}
+
+message DestroyPersistentVolumesResponse {
+    // Metadata of the volumes that were destroyed.
+    repeated PersistentVolume destroyed_volumes = 1;
+}
+
+message DescribePersistentVolumeRequest {
+    // The unique identifier of the persistent volume.
+    string id = 1;
+    // The tag of the persistent volume.
+    string tag = 2;
+    // Optional: The site/region where the volume is located. If provided, only that region is queried.
+    string site = 3;
+}
+
+message DescribePersistentVolumeResponse {
+    PersistentVolume volume = 1;
+}
+
+message DescribePersistentVolumeSnapshotRequest {
+    // Required: snapshot ID returned by ListPersistentVolumeSnapshots, not a metadata blob ID.
+    string id = 1;
+    // Required: the persistent volume tag the snapshot belongs to.
+    string tag = 2;
+    // Optional: restrict the lookup to this site/region.
+    string site = 3;
+}
+
+message DescribePersistentVolumeSnapshotResponse {
+    PersistentVolumeSnapshot snapshot = 1;
+    // Computed from this snapshot's completed metadata, never live writes.
+    PersistentVolumeSnapshotUsage usage = 2;
+}
+
+// Disk-page usage of an immutable snapshot, not guest filesystem usage or billing
+// usage. Excludes metadata, companion files, base images, and storage replication.
+message PersistentVolumeSnapshotUsage {
+    string snapshot_blob_id = 1;
+    // Distinct page blobs retained by the snapshot.
+    int64 page_count = 2;
+    // Sum of those blobs' lengths, including overwritten space within each page.
+    // Does not subtract sharing with other snapshots.
+    int64 page_bytes = 3;
+    // Logical blocks mapped to pages. Holes and blocks supplied by a base image are excluded.
+    int64 allocated_block_count = 4;
+    int64 block_size_bytes = 5;
+    // allocated_block_count * block_size_bytes: effective allocated disk bytes.
+    int64 allocated_bytes = 6;
+}
+
+message ListPersistentVolumeSnapshotsRequest {
+    // The unique identifier of the persistent volume.
+    string id = 1;
+    // The tag of the persistent volume.
+    string tag = 2;
+    // Optional: The site/region where the volume is located. If provided, only that region is queried.
+    string site = 3;
+}
+
+message ListPersistentVolumeSnapshotsResponse {
+    repeated PersistentVolumeSnapshot snapshots = 1;
+}
+
+message PersistentVolume {
+    // The unique identifier of this persistent volume instance.
+    string id = 1;
+
+    // Which volume tag does this volume belong to?
+    string tag = 2;
+
+    // The timestamp of when the volume was created (in UTC).
+    google.protobuf.Timestamp created_at = 3;
+
+    // The timestamp of when the volume was destroyed (in UTC). Not set if the
+    // volume is still active.
+    google.protobuf.Timestamp destroyed_at = 4;
+
+    // The requested size of the volume in megabytes.
+    uint32 size_mb = 5;
+
+    // The ID of the compute instance that this volume is attached to.
+    // Empty if the volume is not currently attached.
+    string attached_to = 6;
+
+    // The timestamp of when the volume was released/detached (in UTC).
+    // Not set if the volume is still attached.
+    google.protobuf.Timestamp released_at = 7;
+
+    // The reason why the volume was released.
+    string released_reason = 8;
+
+    // The site/region where this volume is located (e.g. "zrh", "ord", "iad").
+    string site = 9;
+}
+
+message PersistentVolumeSnapshot {
+    // The unique identifier of this snapshot.
+    string id = 1;
+
+    // The timestamp of when the snapshot was created (in UTC).
+    google.protobuf.Timestamp created_at = 2;
+
+    // The total size of the snapshot in bytes (sum of all pages).
+    uint64 used_bytes = 3;
+
+    // The ID of the snapshot this snapshot was created from.
+    // Empty if this is the first snapshot.
+    string snapshot_from = 4;
+
+    // The completed snapshot ID. Empty if the snapshot is still in progress.
+    string completed_snapshot = 5;
+
+    // The net new bytes added by this snapshot compared to its parent.
+    int64 net_new_used_bytes = 6;
+
+    // The instance ID that this snapshot is attached to. Empty if not attached.
+    string attached_instance_id = 7;
+
+    // The timestamp of when the snapshot was released (detached from the instance).
+    google.protobuf.Timestamp released_at = 8;
+
+    // The reason why the snapshot was released.
+    string released_reason = 9;
+
+    // The timestamp of when the snapshot was abandoned (in UTC).
+    // Abandoned snapshots are excluded when selecting a base snapshot for new volumes.
+    google.protobuf.Timestamp abandoned_at = 10;
+
+    // The metadata version of the snapshot (e.g., "v1", "v2").
+    string metadata_version = 11;
+}
+
+message DestroyPersistentVolumeSnapshotRequest {
+    // The unique identifier of the snapshot (volume ID).
+    string id = 1;
+    // The tag of the persistent volume.
+    string tag = 2;
+    // Optional: The site/region where the volume is located. If provided, only that region is queried.
+    string site = 3;
+}
+
+message DestroyPersistentVolumeSnapshotResponse {
+    // The snapshot that was abandoned.
+    PersistentVolumeSnapshot snapshot = 1;
+}

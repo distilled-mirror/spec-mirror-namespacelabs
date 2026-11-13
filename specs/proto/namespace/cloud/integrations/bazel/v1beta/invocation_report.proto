@@ -1,0 +1,265 @@
+syntax = "proto3";
+
+package namespace.cloud.integrations.bazel.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/integrations/bazel/v1beta";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "src/main/java/com/google/devtools/build/lib/buildeventstream/proto/build_event_stream.proto";
+import "src/main/protobuf/failure_details.proto";
+
+// Each response contains a deterministic portion of an invocation report.
+// Clients reconstruct the report by retaining the metadata and metrics
+// singular fields, each of which appears in at most one response, and appending
+// repeated fields from every response in stream order.
+message StreamInvocationReportResponse {
+    InvocationReportMetadata metadata = 1;
+    repeated InvocationReportConfiguration configurations = 2;
+    build_event_stream.BuildMetrics metrics = 3;
+    repeated InvocationReportBuildToolLog build_tool_logs = 4;
+    repeated InvocationReportFetch fetches = 5;
+    repeated InvocationReportActionResult action_results = 6;
+    repeated InvocationReportAbort aborts = 7;
+    repeated InvocationReportTarget targets = 8;
+    repeated InvocationReportAction actions = 9;
+}
+
+message InvocationReportMetadata {
+    string invocation_id = 1;
+    string tenant_id = 2;
+    google.protobuf.Timestamp start = 3;
+    google.protobuf.Timestamp completed = 4;
+    string command = 5;
+    string build_tool_version = 6;
+    repeated InvocationReportAttempt attempts = 7;
+    InvocationReportResult result = 8;
+    map<string, string> workspace = 9;
+    repeated string target_patterns = 10;
+    string scheduler_instance = 11;
+}
+
+message InvocationReportAttempt {
+    int64 number = 1;
+    google.protobuf.Timestamp started = 2;
+    google.protobuf.Timestamp completed = 3;
+    InvocationReportAttemptStatus status = 4;
+}
+
+enum InvocationReportAttemptResult {
+    // Values mirror google.devtools.build.v1.BuildStatus.Result because stored
+    // build-event status records are decoded numerically.
+    INVOCATION_REPORT_ATTEMPT_RESULT_UNSPECIFIED = 0;
+    INVOCATION_REPORT_ATTEMPT_RESULT_COMMAND_SUCCEEDED = 1;
+    INVOCATION_REPORT_ATTEMPT_RESULT_COMMAND_FAILED = 2;
+    INVOCATION_REPORT_ATTEMPT_RESULT_USER_ERROR = 3;
+    INVOCATION_REPORT_ATTEMPT_RESULT_SYSTEM_ERROR = 4;
+    INVOCATION_REPORT_ATTEMPT_RESULT_RESOURCE_EXHAUSTED = 5;
+    INVOCATION_REPORT_ATTEMPT_RESULT_INVOCATION_DEADLINE_EXCEEDED = 6;
+    INVOCATION_REPORT_ATTEMPT_RESULT_CANCELLED = 7;
+    INVOCATION_REPORT_ATTEMPT_RESULT_REQUEST_DEADLINE_EXCEEDED = 8;
+}
+
+message InvocationReportAttemptStatus {
+    InvocationReportAttemptResult result = 1;
+    string final_invocation_id = 2;
+}
+
+message InvocationReportResult {
+    optional bool overall_success = 1;
+    build_event_stream.BuildFinished.ExitCode exit_code = 2;
+    failure_details.FailureDetail failure_detail = 3;
+}
+
+message InvocationReportConfiguration {
+    string id = 1;
+    string mnemonic = 2;
+    string platform_name = 3;
+    string cpu = 4;
+}
+
+message InvocationReportBuildToolLog {
+    string name = 1;
+    string text = 2;
+    string uri = 3;
+}
+
+message InvocationReportFetch {
+    string url = 1;
+    int64 downloader = 2;
+    google.protobuf.Timestamp completed = 3;
+    optional bool success = 4;
+}
+
+message InvocationReportActionResult {
+    string primary_output = 1;
+    optional bool success = 2;
+    string type = 3;
+    int32 exit_code = 4;
+    google.protobuf.Timestamp started = 5;
+    google.protobuf.Timestamp completed = 6;
+    failure_details.FailureDetail failure_detail = 7;
+}
+
+message InvocationReportAbort {
+    google.protobuf.Timestamp at = 1;
+    build_event_stream.Aborted.AbortReason reason = 2;
+    string description = 3;
+}
+
+message InvocationReportTarget {
+    string label = 1;
+    string configuration = 2;
+    google.protobuf.Timestamp configured = 3;
+    google.protobuf.Timestamp completed = 4;
+    string target_kind = 5;
+    build_event_stream.TestSize test_size = 6;
+    optional bool success = 7;
+    repeated InvocationReportTargetOutput outputs = 8;
+    repeated string tags = 9;
+    google.protobuf.Duration test_timeout = 10;
+    failure_details.FailureDetail failure_detail = 11;
+    repeated InvocationReportTargetTestResult test_results = 12;
+    InvocationReportTargetTestSummary test_summary = 13;
+    repeated InvocationReportActionResult action_results = 14;
+    InvocationReportTargetSummary summary = 15;
+    InvocationReportAbort abort = 16;
+}
+
+message InvocationReportTargetOutput {
+    string name = 1;
+    int32 file_count = 2;
+}
+
+message InvocationReportTargetTestResult {
+    int64 run = 1;
+    int64 shard = 2;
+    int64 attempt = 3;
+    build_event_stream.TestStatus status = 4;
+    build_event_stream.TestResult.ExecutionInfo execution_info = 5;
+    google.protobuf.Timestamp attempt_started = 6;
+    google.protobuf.Duration attempt_duration = 7;
+}
+
+message InvocationReportTargetTestSummary {
+    build_event_stream.TestStatus overall_status = 1;
+    int64 run_count = 2;
+    int64 attempt_count = 3;
+    int64 total_run_count = 4;
+    google.protobuf.Timestamp first_started = 5;
+    google.protobuf.Timestamp last_completed = 6;
+    google.protobuf.Duration total_duration = 7;
+}
+
+message InvocationReportTargetSummary {
+    optional bool overall_build_success = 1;
+    build_event_stream.TestStatus overall_test_status = 2;
+}
+
+enum InvocationReportCacheLookup {
+    INVOCATION_REPORT_CACHE_LOOKUP_UNSPECIFIED = 0;
+    INVOCATION_REPORT_CACHE_LOOKUP_HIT = 1;
+    INVOCATION_REPORT_CACHE_LOOKUP_MISS = 2;
+    INVOCATION_REPORT_CACHE_LOOKUP_SKIPPED = 3;
+    INVOCATION_REPORT_CACHE_LOOKUP_ERROR = 4;
+}
+
+enum InvocationReportCacheSource {
+    INVOCATION_REPORT_CACHE_SOURCE_UNSPECIFIED = 0;
+    INVOCATION_REPORT_CACHE_SOURCE_NONE = 1;
+    INVOCATION_REPORT_CACHE_SOURCE_HOT = 2;
+    INVOCATION_REPORT_CACHE_SOURCE_WARM = 3;
+}
+
+message InvocationReportCacheLookupDetails {
+    google.protobuf.Timestamp requested = 1;
+    google.protobuf.Timestamp completed = 2;
+    optional double duration_ms = 3;
+    InvocationReportCacheSource source = 4;
+    bool dependency_miss = 5;
+    string status_code = 6;
+}
+
+message InvocationReportAction {
+    // When the scheduler received this action request.
+    google.protobuf.Timestamp requested = 1;
+    string action_digest = 2;
+    string mnemonic = 3;
+    string target = 4;
+    string configuration = 5;
+    InvocationReportCacheLookup cache_lookup = 6;
+    InvocationReportRemoteExecution remote_execution = 7;
+    InvocationReportCacheLookupDetails cache_lookup_details = 8;
+}
+
+message InvocationReportRemoteExecution {
+    string operation = 1;
+    InvocationReportJoinedExistingOperation joined_existing_operation = 2;
+    repeated InvocationReportWorkerAssignment assignments = 3;
+}
+
+message InvocationReportJoinedExistingOperation {
+    string original_invocation_id = 1;
+    repeated InvocationReportCandidateOriginalInvocation candidate_original_invocations = 2;
+}
+
+message InvocationReportCandidateOriginalInvocation {
+    string invocation_id = 1;
+    repeated google.protobuf.Timestamp evidence_timestamps = 2;
+}
+
+message InvocationReportWorkerAssignment {
+    string name = 1;
+    string instance_id = 2;
+    // When the scheduler dispatched the operation to this worker.
+    google.protobuf.Timestamp dispatched = 3;
+    // Time the operation spent in the scheduler queue before dispatch.
+    optional double scheduler_queue_ms = 4;
+    // Remaining worker-reported queue wait after scheduler queue time is
+    // subtracted. This covers dispatch until execution began on the worker.
+    optional double worker_queue_ms = 5;
+    // Worker slot lifecycle, from receiving through finishing the assignment.
+    // This may enclose execution and output upload.
+    InvocationReportWorkerAssignmentTiming assignment = 6;
+    // Worker-recorded action execution, excluding worker queue wait.
+    InvocationReportWorkerExecution execution = 7;
+    // When the scheduler received the worker's result.
+    google.protobuf.Timestamp result_received = 8;
+}
+
+message InvocationReportWorkerAssignmentTiming {
+    // When the worker slot received the assignment.
+    google.protobuf.Timestamp started = 1;
+    // When the worker slot finished the assignment.
+    google.protobuf.Timestamp completed = 2;
+    // Worker-reported assignment duration. Prefer the timestamps for wall time.
+    optional double duration_ms = 3;
+}
+
+message InvocationReportWorkerExecution {
+    // When the worker reports that the action entered its queue.
+    google.protobuf.Timestamp queued = 1;
+    // When worker processing began, before hydration and execution phases.
+    google.protobuf.Timestamp started = 2;
+    // When worker processing completed, after output upload.
+    google.protobuf.Timestamp completed = 3;
+    // Worker processing duration from started to completed. Queue wait is not
+    // included.
+    optional double duration_ms = 4;
+    // Phase-level worker timings. Duration fields are retained for sources that
+    // do not emit the corresponding timestamps.
+    InvocationReportWorkerExecutionTiming timing = 5;
+}
+
+message InvocationReportWorkerExecutionTiming {
+    google.protobuf.Timestamp hydration_started = 1;
+    google.protobuf.Timestamp hydration_completed = 2;
+    google.protobuf.Timestamp execution_started = 3;
+    google.protobuf.Timestamp execution_completed = 4;
+    google.protobuf.Timestamp output_upload_started = 5;
+    google.protobuf.Timestamp output_upload_completed = 6;
+    optional double hydration_ms = 7;
+    optional double exec_setup_ms = 8;
+    optional double execution_ms = 9;
+    optional double output_upload_ms = 10;
+}

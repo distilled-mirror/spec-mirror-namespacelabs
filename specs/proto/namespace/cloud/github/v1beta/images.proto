@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package namespace.cloud.github.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/github/v1beta";
+
+import "proto/namespace/private/images/baseimage.proto";
+import "proto/namespace/stdlib/matchers.proto";
+
+// ImageService provides access to Namespace-managed base images for GitHub runners.
+//
+// ## Access
+//
+// This service is available at the global endpoint:
+// ```
+// https://global.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls require a *tenant token* passed as a Bearer token.
+// See the [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta)
+// for obtaining tokens.
+service ImageService {
+    // Lists currently available base images for GitHub runners.
+    // Returns only active images that can be used for new runners.
+    rpc ListBaseImages(ListBaseImagesRequest) returns (ListBaseImagesResponse);
+}
+
+message ListBaseImagesRequest {
+    // Filter by labels (e.g., "ubuntu-24.04", "macos-15").
+    namespace.stdlib.StringMatcher labels = 1;
+
+    // Filter by release stage. Default: only PRODUCTION images.
+    repeated namespace.private.images.v1beta.ReleaseStage release_stages = 2;
+}
+
+message ListBaseImagesResponse {
+    repeated RunnerBaseImage images = 1;
+}
+
+message RunnerBaseImage {
+    // runs-on label (e.g., "ubuntu-24.04", "macos-15").
+    string label = 1;
+
+    // Image reference.
+    string image_ref = 2;
+
+    // The base image specification (OS, packages, etc.)
+    namespace.private.images.v1beta.BaseImage spec = 3;
+
+    // Human-readable title (e.g., "Ubuntu 24.04 LTS").
+    string title = 4;
+}

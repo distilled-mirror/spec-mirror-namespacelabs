@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+package namespace.cloud.vault.v1beta;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/stdlib/labels.proto";
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/vault/v1beta";
+
+// VaultService allows the management of secrets for a workspace. Secrets are
+// versioned, encrypted objects that can be referenced by compute instances at
+// creation time (e.g. via EnvironmentVariable.from_secret_id).
+//
+// See https://namespace.so/docs/architecture/storage/secrets for an overview.
+//
+// ## Access
+//
+// VaultService is available over gRPC and HTTP on the following endpoint:
+//
+// ```
+// https://global.namespaceapis.com:443
+// ```
+//
+// ## SDKs and Examples
+//
+// **Go SDK**: [namespacelabs.dev/integrations](https://github.com/namespacelabs/integrations) —
+// provides ready-to-use gRPC clients and authentication helpers.
+//
+// **TypeScript SDK**: [@namespacelabs/sdk](https://github.com/namespacelabs/typescript-sdk) —
+// provides typed clients, authentication, and token management for Node.js.
+//
+// ## Authentication
+//
+// Calls to the VaultService require a *tenant token* passed as a Bearer token
+// as part of each call. These are always required.
+//
+// A *tenant token* identifies both the workspace that the call operates on, but
+// may also constrain the set of actions that the caller may do.
+//
+// A *tenant token* can be obtained using the
+// [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta).
+service VaultService {
+    // Creates a new secret object in the workspace vault.
+    //
+    // ### Errors
+    // - If one of the properties that are passed in is invalid, an
+    //   `InvalidArgument` status is returned.
+    rpc CreateObject(CreateObjectRequest) returns (VaultObjectMetadata);
+
+    // Adds a new version to an existing secret object.
+    //
+    // ### Errors
+    // - If the object does not exist, a `NotFound` status is returned.
+    // - If `if_version_matches` is set and the current version does not match,
+    //   a `FailedPrecondition` status is returned.
+    rpc UpdateObject(UpdateObjectRequest) returns (VaultObjectMetadata);
+
+    // Retrieves the metadata (and optionally the value) of a secret object.
+    // The value is only returned if the object was created with `revealable`
+    // set to true.
+    //
+    // ### Errors
+    // - If the object does not exist, a `NotFound` status is returned.
+    rpc DescribeObject(DescribeObjectRequest) returns (DescribeObjectResponse);
+
+    // Returns the most recent version of each non-deleted secret object in the
+    // workspace vault.
+    rpc ListObjects(ListObjectsRequest) returns (ListObjectsResponse);
+
+    // Permanently deletes a secret object.
+    //
+    // ### Errors
+    // - If the object does not exist, a `NotFound` status is returned.
+    // - If `if_version_matches` is set and the current version does not match,
+    //   a `FailedPrecondition` status is returned.
+    rpc DeleteObject(DeleteObjectRequest) returns (google.protobuf.Empty);
+}
+
+message CreateObjectRequest {
+    // A description of the object.
+    string description = 1;
+
+    // The initial value to be stored, required.
+    string value = 2;
+
+    // If set to true, the secret value will be returned in future
+    // DescribeObject calls. This cannot be changed after creation.
+    bool revealable = 3;
+
+    // You can specify additional context to attach to an object. Labels are
+    // immutable and are shared across all versions. Objects can be listed based
+    // on label constraints. Label names are limited to 63 bytes and values to
+    // 255 bytes. The combined size of all label names and values cannot exceed
+    // 4 KiB.
+    repeated namespace.stdlib.Label labels = 4;
+}
+
+message UpdateObjectRequest {
+    // The ID of the object being updated.
+    string object_id = 1;
+
+    // The value to be added to a new version.
+    string new_value = 2;
+
+    // If set, fail the request if the object does not currently match the
+    // specified version (as included in VaultObjectMetadata).
+    string if_version_matches = 3;
+}
+
+message DescribeObjectRequest {
+    // Fetch the object version that matches the specified id.
+    string object_id = 1;
+}
+
+message ListObjectsRequest {
+    // If not specified, returns all objects.
+    repeated namespace.stdlib.LabelFilterEntry label_filter = 1;
+}
+
+message ListObjectsResponse {
+    // Returns the most recent version of each object that has not been deleted.
+    repeated VaultObjectMetadata objects = 1;
+}
+
+message DeleteObjectRequest {
+    // The ID of the object to delete.
+    string object_id = 1;
+
+    // If set, fail the request if the object does not currently match the
+    // specified version (as included in VaultObjectMetadata).
+    string if_version_matches = 2;
+}
+
+message VaultObjectMetadata {
+    // The unique identifier of this secret object.
+    string object_id = 1;
+    // A human-readable description of the object.
+    string description = 2;
+    // An opaque version identifier for this object. Changes with each update.
+    // Can be used with `if_version_matches` for optimistic concurrency control.
+    string version = 3;
+    // Timestamp of when this object was created (in UTC).
+    google.protobuf.Timestamp created_at = 4;
+    // Timestamp of when this object was deleted (in UTC). Not set if the object
+    // is still active.
+    google.protobuf.Timestamp deleted_at = 5;
+    // Labels attached to this object. Labels are immutable and shared across
+    // all versions.
+    repeated namespace.stdlib.Label labels = 6;
+}
+
+message DescribeObjectResponse {
+    // The metadata of the requested object.
+    VaultObjectMetadata metadata = 1;
+
+    // The decrypted value of the secret. Only set if the object was created
+    // with `revealable` set to true.
+    string value = 2;
+
+    // A few most recent previous versions of the object, for audit purposes.
+    repeated VaultObjectMetadata previous = 3;
+}

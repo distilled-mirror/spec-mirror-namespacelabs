@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package namespace.cloud.compute.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/compute/v1beta";
+
+message UsagePolicy {
+    ConcurrencyLimits              concurrency_limits  = 1;  // If set, limits how many resources can be used concurrently.
+    UsageLimits                    usage_limits        = 2;  // If set, limits how many resources can be used in a period.
+    repeated string                enabled_platforms   = 3;  // Overwrites the set of enabled platforms. E.g. linux/arm64, linux/amd64, macos/arm64, windows/amd64.
+    map<string, PerPlatformLimits> per_platform_limits = 4;  // Key is linux/amd64, linux/arm64, macos/arm64 or windows/amd64.
+    DevboxLimits                   devbox_limits       = 5;  // If set, applies limits to devboxes created in a tenant.
+
+    message ConcurrencyLimits {
+        int64 max_cpu            = 1;
+        int64 max_memory_mb      = 2;
+        int64 max_instance_count = 3;
+    }
+
+    message UsageLimits {
+        int32 unit_minutes = 1;
+        int32 builds       = 2;
+        int64 wall_seconds = 3;
+    }
+
+    message ShapeLimits {
+        MachineShapeSize largest_acceptable_shape = 1;
+    }
+
+    message PerPlatformLimits {
+        ConcurrencyLimits       concurrency_limits = 1;
+        ShapeLimits             shape_limits       = 2;
+        repeated PerShapeLimits per_shape_limits   = 3;  // List of per-shape concurrency limits.
+    }
+
+    message MachineShapeSize {
+        int64 cpu       = 1;
+        int64 memory_mb = 2;
+    }
+
+    message PerShapeLimits {
+        MachineShapeSize  shape  = 1;
+        ConcurrencyLimits limits = 2;
+    }
+
+    message DevboxLimits {
+        int32 max_count = 1;
+    }
+}

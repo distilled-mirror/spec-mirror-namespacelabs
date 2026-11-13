@@ -1,0 +1,310 @@
+syntax = "proto3";
+
+package namespace.cloud.storage.v1beta;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/stdlib/labels.proto";
+import "proto/namespace/stdlib/matchers.proto";
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/storage/v1beta";
+
+// ArtifactsService allows the management of binary artifacts used by a
+// workspace. Artifacts are stored as versioned, labeled objects that can be
+// uploaded and downloaded via signed URLs.
+//
+// See https://namespace.so/docs/architecture/storage/artifact-storage for an overview.
+//
+// ## Access
+//
+// ArtifactsService is regionalized for fault tolerance.
+// Reach out to Namespace team at support@namespace.so for a list of available regions.
+//
+// ```
+// https://{region}.storage.namespaceapis.com:443
+// # E.g.:
+// https://ord.storage.namespaceapis.com:443
+// ```
+//
+// ## SDKs and Examples
+//
+// **Go SDK**: [namespacelabs.dev/integrations](https://github.com/namespacelabs/integrations) —
+// provides ready-to-use gRPC clients and authentication helpers.
+//
+// **TypeScript SDK**: [@namespacelabs/sdk](https://github.com/namespacelabs/typescript-sdk) —
+// provides typed clients, authentication, and token management for Node.js.
+//
+// ## Authentication
+//
+// Calls to the ArtifactsService require a *tenant token* passed as a Bearer token as
+// part of each call. These are always required.
+//
+// A *tenant token* identifies both the workspace that the call operates on, but
+// may also constrain the set of actions that the caller may do.
+//
+// A *tenant token* can be obtained using the
+// [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta).
+service ArtifactsService {
+    // Creates a new artifact and returns a signed upload URL.
+    //
+    // Artifact creation follows a two-phase commit model:
+    // 1. Call CreateArtifact to obtain a `signed_upload_url` and `upload_id`.
+    // 2. Upload the artifact data to the signed URL using an HTTP PUT request.
+    // 3. Call FinalizeArtifact with the `upload_id` to commit the artifact.
+    //
+    // The artifact is not accessible for download until finalized.
+    rpc CreateArtifact(CreateArtifactRequest) returns (CreateArtifactResponse);
+
+    // Finalize a fully uploaded artifact (making it available for download).
+    rpc FinalizeArtifact(FinalizeArtifactRequest) returns (FinalizeArtifactResponse);
+
+    // Resolves a finalized artifact and generates a download URL.
+    rpc ResolveArtifact(ResolveArtifactRequest) returns (ResolveArtifactResponse);
+
+    // List finalized artifacts.
+    rpc ListArtifacts(ListArtifactsRequest) returns (ListArtifactsResponse);
+
+    // List namespaces with finalized artifacts.
+    rpc ListNamespaces(ListNamespacesRequest) returns (ListNamespacesResponse);
+
+    // Mark an artifact as eligible for garbage-collection.
+    rpc ExpireArtifact(ExpireArtifactRequest) returns (google.protobuf.Empty);
+
+    // Extend the expiration of a finalized artifact.
+    //
+    // This enables dynamic, access-based retention: create artifacts with a
+    // short expiration and push it out whenever they are accessed.
+    //
+    // ### Errors
+    // - If the artifact does not exist or has already expired, a `NotFound`
+    //   status is returned.
+    rpc ExtendArtifact(ExtendArtifactRequest) returns (ExtendArtifactResponse);
+}
+
+message CreateArtifactRequest {
+    // The file path for the artifact to be stored.
+    string path = 1;
+
+    // The namespace that the artifact belongs to.
+    // Currently, artifact creation outside of the `main` namespace is not permitted.
+    string namespace = 2;
+
+    // Set a custom expiration date for the artifact.
+    // If not provided the artifact never expires.
+    google.protobuf.Timestamp expires_at = 3;
+
+    // A set of labels that are attached to the new artifact.
+    repeated namespace.stdlib.Label labels = 5;
+
+    // Deprecated: please enable versioning using `if_exists.create_new_version`.
+    // Whether overwriting an existing artifact with the same path within the same namespace is allowed or not.
+    bool overwrite = 6 [deprecated = true];
+
+    // Deprecated: use `if_exists.create_new_version` instead.
+    // If a version of the artifact already exists, create a new version rather than failing creation.
+    bool create_new_version_if_exists = 7 [deprecated = true];
+
+    // Controls creation when the same tenant, namespace, and path already exist.
+    // Cannot be combined with overwrite or create_new_version_if_exists set to true.
+    IfExists if_exists = 8;
+
+    message IfExists {
+        // Create a new version instead of returning AlreadyExists.
+        bool create_new_version = 1;
+
+        // After successful finalization, retain at most this many live versions,
+        // including the new version. The new version is retained first; remaining
+        // slots are filled by creation time, newest first, with artifact ID as a
+        // deterministic tie-breaker.
+        // Older versions are expired; their metadata remains and their data is
+        // garbage-collected asynchronously. Existing expiration dates still apply.
+        // Zero means no count limit. Negative values are invalid.
+        // A positive value requires create_new_version and artifact:expire access.
+        // Applies only to this upload, not to subsequent uploads that omit it.
+        int32 keep_max_versions = 2;
+    }
+}
+
+message CreateArtifactResponse {
+    // A pre-signed URL to upload the artifact data to. Use HTTP PUT to upload.
+    // The URL is valid for a limited time.
+    string signed_upload_url = 1;
+
+    // The identifier for this upload. Pass this to FinalizeArtifact after
+    // the upload is complete.
+    string upload_id = 2;
+
+    // The date at which the artifact expires.
+    google.protobuf.Timestamp expires_at = 3;
+}
+
+message FinalizeArtifactRequest {
+    // The upload ID returned by CreateArtifact. Required.
+    string upload_id = 3;
+
+    // Labels to append to the artifact record.
+    repeated namespace.stdlib.Label add_labels = 4;
+
+    // Unused, upload_id is sufficient.
+    string path = 1 [deprecated = true];
+
+    // Unused, upload_id is sufficient.
+    string namespace = 2 [deprecated = true];
+}
+
+message FinalizeArtifactResponse {
+    Artifact description = 1;
+}
+
+message ResolveArtifactRequest {
+    // The file path for the stored artifact.
+    string path = 1;
+
+    // The namespace that the artifact belongs to.
+    string namespace = 2;
+
+    // Don't produce a download URL; merely query the metadata.
+    bool metadata_only = 3;
+
+    // If an expired artifact should be returned or not.
+    // If set to false an error is returned.
+    bool include_expired = 4;
+}
+
+message ResolveArtifactResponse {
+    // Metadata about the requested artifact.
+    Artifact description = 3;
+
+    // Direct URL to download the artifact without authentication.
+    // Valid within 30 minutes from the time of the request.
+    string signed_download_url = 1;
+
+    // The date at which the artifact expires.
+    google.protobuf.Timestamp expires_at = 2;
+}
+
+message ExpireArtifactRequest {
+    // The file path for the stored artifact.
+    string path = 1;
+
+    // The namespace that the artifact belongs to.
+    string namespace = 2;
+}
+
+message ExtendArtifactRequest {
+    // The file path for the stored artifact.
+    string path = 1;
+
+    // The namespace that the artifact belongs to.
+    string namespace = 2;
+
+    // At least one of `extend_by` or `ensure_minimum` must be set. When both are
+    // set, `extend_by` is applied first and `ensure_minimum` then acts as a
+    // lower bound on the result.
+
+    // Extend the current expiration by this duration, relative to the artifact's
+    // current expiration.
+    //
+    // Note: In JSON format, the Duration type is encoded as a string ending in
+    // the suffix "s" (seconds), e.g. "3600s".
+    google.protobuf.Duration extend_by = 3;
+
+    // Ensure the artifact expires no sooner than this duration from now. This is
+    // a lower bound, relative to the current time, and can be combined with
+    // `extend_by`.
+    //
+    // Note: In JSON format, the Duration type is encoded as a string ending in
+    // the suffix "s" (seconds), e.g. "3600s".
+    google.protobuf.Duration ensure_minimum = 4;
+}
+
+message ExtendArtifactResponse {
+    // The effective expiration of the artifact after this call. Unset if the
+    // artifact never expires.
+    google.protobuf.Timestamp expires_at = 1;
+}
+
+message ListArtifactsRequest {
+    // If set, only return artifacts that belong to any of these namespaces.
+    repeated string namespaces = 1;
+
+    // Only return artifacts that match the specified filter.
+    repeated namespace.stdlib.LabelFilterEntry label_filter = 2;
+
+    // Request a maximum N entries.
+    int32 max_entries = 3;
+
+    // Don't return expired entries.
+    bool skip_expired = 5;
+
+    // If provided, produces additional entries based on a previous list. In
+    // this case, `namespaces` and `label_filter` are ignored.
+    bytes pagination_cursor = 4;
+
+    OrderBy order_by = 6;
+
+    // Filter artifacts by size in bytes.
+    namespace.stdlib.Int64Range size_range = 7;
+
+    // Filter artifacts by path regular expressions. IS_ANY_OF matches any regex;
+    // IS_NOT excludes paths matching any regex.
+    namespace.stdlib.StringMatcher match_path_regex = 8;
+
+    enum OrderBy {
+        ORDER_BY_UNKNOWN = 0;
+        CreatedAt_Desc   = 1;
+    }
+}
+
+message ListNamespacesRequest {}
+
+message ListNamespacesResponse {
+    repeated Namespace namespaces = 1;
+}
+
+message Namespace {
+    string name = 1;
+    string kind = 2;
+}
+
+message ListArtifactsResponse {
+    repeated Artifact artifacts = 1;
+
+    // Pass this to a subsequent ListRequest to obtain additional pages of data.
+    bytes pagination_cursor = 2;
+}
+
+message Artifact {
+    // The unique identifier of this artifact.
+    string id = 10;
+
+    // The file path for the stored artifact.
+    string path = 1;
+
+    // The namespace that the artifact belongs to.
+    string namespace = 2;
+
+    // The date at which the artifact was created.
+    google.protobuf.Timestamp created_at = 6;
+
+    // The date at which the artifact expires.
+    google.protobuf.Timestamp expires_at = 3;
+
+    repeated namespace.stdlib.Label labels = 5;
+
+    // The size of the uploaded data in bytes.
+    int64 size = 7;
+
+    // URL to the dashboard for this artifact.
+    string web_url = 8;
+
+    // In which state this artifact is.
+    Status status = 9;
+
+    enum Status {
+        STATE_UNKNOWN = 0;
+        LIVE          = 1;
+        EXPIRED       = 2;
+    }
+}

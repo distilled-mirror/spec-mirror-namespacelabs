@@ -1,0 +1,178 @@
+syntax = "proto3";
+
+package namespace.experimental.remote;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/experimental/remote";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/cloud/compute/v1beta/compute.proto";
+import "proto/namespace/experimental/remote/results.proto";
+
+// ExecutionService coordinates local command executions and snapshot
+// fetching, providing deduplication when multiple callers request the
+// same operation concurrently.
+//
+// The service is intended to be run as a local daemon by the "remote"
+// CLI. When multiple CLI invocations target the same inputs, only one
+// execution is performed and the result is shared with all callers.
+//
+// ## Execution deduplication
+//
+// 1. Call `Execute` with the input specification and command.
+// 2. The service checks the remote cache, joins an in-progress
+//    execution with the same inputs, or starts a new one.
+// 3. The response streams status updates and the final result.
+//
+// ## Snapshot deduplication
+//
+// 1. Call `FetchSnapshot` with a result reference and target directory.
+// 2. If another caller is already fetching the same snapshot, the
+//    download is shared and both callers receive the result.
+service ExecutionService {
+    // Execute runs a command with the given inputs.
+    //
+    // If a cached result exists for the inputs, it is returned immediately.
+    // If an identical execution is already in progress (same input set),
+    // the caller joins it and receives the result when it completes.
+    // Otherwise, a new execution is started.
+    //
+    // The response is a stream of events: status updates, optional log
+    // output, and a terminal result event.
+    rpc Execute(ExecuteRequest) returns (stream ExecuteEvent);
+
+    // FetchSnapshot downloads a snapshot to a local directory.
+    //
+    // If another caller is already fetching the same snapshot, the
+    // request joins the in-progress download. The response is returned
+    // once the snapshot is fully available locally.
+    rpc FetchSnapshot(FetchSnapshotRequest) returns (FetchSnapshotResponse);
+}
+
+message ExecuteRequest {
+    // The base container image for command execution.
+    // Must be a container_image input.
+    Input base = 1;
+
+    // The command and arguments to execute (e.g., ["go", "build", "-o", "/out/bin"]).
+    // Entries may reference environment variables using shell syntax (e.g., $HOME, ${GOPATH}).
+    repeated string command = 2;
+
+    // Environment variables for the command.
+    repeated namespace.cloud.compute.v1beta.EnvironmentVariable env = 3;
+
+    // The target platform (e.g., "linux/amd64").
+    string platform = 4;
+
+    // Inputs mounted at specific paths within the execution environment.
+    // For example, a git checkout mounted at /workspace.
+    repeated MountedInput mounts = 5;
+
+    // The working directory for the command inside the container.
+    // Defaults to "/" if not set.
+    string cwd = 6;
+
+    // If true, only check cache status without executing on a miss.
+    bool check_only = 7;
+
+    // If true, execute the command but do not persist the result.
+    bool no_cache = 8;
+
+    message MountedInput {
+        // The path where the input should be mounted.
+        string mount_point = 1;
+
+        // The input to mount.
+        Input input = 2;
+    }
+}
+
+// ExecuteEvent is a streaming response from Execute.
+// Exactly one field is set per event.
+message ExecuteEvent {
+    // A status update about the execution lifecycle.
+    ExecutionStatus status = 1;
+
+    // A chunk of command output (stdout or stderr).
+    LogChunk log = 2;
+
+    // The terminal event indicating the execution completed.
+    // Always the last event in the stream.
+    ExecuteResult result = 3;
+}
+
+// ExecutionStatus describes the current phase of execution.
+message ExecutionStatus {
+    ExecutionPhase phase = 1;
+
+    // Human-readable description of what is happening.
+    string message = 2;
+}
+
+enum ExecutionPhase {
+    EXECUTION_PHASE_UNSPECIFIED = 0;
+
+    // Checking the remote cache for an existing result.
+    EXECUTION_PHASE_CACHE_CHECK = 1;
+
+    // Waiting for an identical in-progress execution to complete.
+    EXECUTION_PHASE_WAITING = 2;
+
+    // Preparing inputs (e.g., fetching git repository).
+    EXECUTION_PHASE_PREPARING = 3;
+
+    // Running the command.
+    EXECUTION_PHASE_EXECUTING = 4;
+
+    // Uploading outputs to the remote cache.
+    EXECUTION_PHASE_UPLOADING = 5;
+}
+
+// ExecuteResult is the terminal event of an Execute stream.
+message ExecuteResult {
+    // The unique identifier for the result, if persisted.
+    string result_id = 1;
+
+    // Whether the result came from the remote cache.
+    bool cache_hit = 2;
+
+    // Snapshots produced by the execution.
+    repeated Snapshot snapshots = 3;
+
+    // The wall-clock duration of the command execution.
+    // Not set on cache hits.
+    google.protobuf.Duration command_duration = 4;
+
+    // When this result was originally computed.
+    google.protobuf.Timestamp computed_at = 5;
+
+    // Local directory where the output snapshot is stored on the daemon's
+    // filesystem. Set when the daemon has a snapshot directory configured
+    // and the output was moved there. Callers on the same host can read
+    // from this path directly without going through FetchSnapshot.
+    string local_result_dir = 6;
+}
+
+message FetchSnapshotRequest {
+    // The result containing the snapshot to fetch.
+    string result_id = 1;
+
+    // The snapshot key within the result.
+    // Optional if the result has exactly one snapshot.
+    string snapshot_key = 2;
+
+    // The local directory to unpack the snapshot into.
+    string target_dir = 3;
+}
+
+message FetchSnapshotResponse {
+    // The local directory where the snapshot was unpacked.
+    string target_dir = 1;
+
+    // Whether the fetch was served from a local cache rather than
+    // downloading from the remote storage.
+    bool was_cached = 2;
+
+    // The snapshot that was fetched.
+    Snapshot snapshot = 3;
+}

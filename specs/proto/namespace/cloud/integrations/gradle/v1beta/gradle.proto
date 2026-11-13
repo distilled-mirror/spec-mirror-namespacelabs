@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package namespace.cloud.integrations.gradle.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/integrations/gradle/v1beta";
+
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/cloud/iam/v1beta/authz.proto";
+
+// GradleCacheService provides access to Namespace's managed Gradle build cache.
+// The cache accelerates builds by storing and retrieving build outputs.
+// See https://namespace.so/docs/integrations/gradle for an overview.
+//
+// ## Access
+//
+// This service is available at the global endpoint:
+// ```
+// https://global.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls require a *tenant token* passed as a Bearer token.
+// See the [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta)
+// for obtaining tokens.
+service GradleCacheService {
+    // Returns cache configuration for the caller's environment.
+    // Creates necessary resources if they don't exist.
+    rpc EnsureGradleCache(EnsureGradleCacheRequest) returns (EnsureGradleCacheResponse);
+
+    // Returns the required permissions that are needed to access Gradle caches.
+    rpc GetAccessPolicy(GetAccessPolicyRequest) returns (AccessPolicy);
+}
+
+message EnsureGradleCacheRequest {
+    // A name of the cache.
+    string name = 1;
+
+    // Optional site preference (e.g., "iad", "ord"). If not set, the site is
+    // determined from the caller's location or workload context.
+    string site = 2;
+}
+
+message EnsureGradleCacheResponse {
+    // The URL endpoint for the Gradle build cache.
+    string cache_endpoint_url = 1;
+
+    string username = 2;
+    string password = 3;
+
+    // Until when is the returned cache configuration usable.
+    google.protobuf.Timestamp expires_at = 4;
+
+    // The site where the cache is located (e.g., "iad", "ord").
+    string site = 5;
+}
+
+message GetAccessPolicyRequest {
+    // A name of the cache.
+    string name = 1;
+}
+
+message AccessPolicy {
+    // The set of permissions that is required to access Gradle caches.
+    repeated namespace.cloud.iam.v1beta.Permission required_permission = 1;
+}

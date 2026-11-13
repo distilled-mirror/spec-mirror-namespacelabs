@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package namespace.cloud.compute.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/compute/v1beta";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+service ManagementService {
+    // Sets the list of known images.
+    // Known images are optimized in Namespace systems to allow fast booting time of agent instances.
+    //
+    // Access requires a partner token trusted by Namespace (OIDC token).
+    //
+    // Authentication: partner token.
+    rpc SetKnownImages(SetKnownImagesRequest) returns (google.protobuf.Empty);
+
+    // Returns the list of known images, previously registered via SetKnownImages API.
+    //
+    // Access requires a partner token trusted by Namespace (OIDC token).
+    //
+    // Authentication: partner token.
+    rpc GetKnownImages(google.protobuf.Empty) returns (GetKnownImagesResponse);
+}
+
+message SetKnownImagesRequest {
+    // Exhaustive of full image refs.
+    // Only images provided in this list will be kept known and optimized throughout Namespace systems.
+    // Images that are not present are considered unneeded and may be deoptimized at anytime.
+    repeated KnownImage known_images = 1;
+}
+
+message GetKnownImagesResponse {
+    repeated ImageState images = 1;
+}
+
+message KnownImage {
+    // Full image reference.
+    string image_ref = 1;
+    // Purpose of use of the image.
+    Purpose purpose = 2;
+
+    enum Purpose {
+        PURPOSE_UNKNOWN  = 0;
+        LINUX_BASE_IMAGE = 1;
+    }
+}
+
+message ImageState {
+    KnownImage known_image = 1;
+    // The timestamp (in UTC) of when the image was made known to Namespace.
+    google.protobuf.Timestamp known_at = 2;
+    // The current distributed state of the image. E.g. `IN_PROGRESS`, `COMPLETED` or `FAILED`.
+    DistributionState distribution_state = 3;
+
+    enum DistributionState {
+        DISTRIBUTION_STATE_UNKNOWN = 0;
+        IN_PROGRESS                = 1;
+        COMPLETED                  = 2;
+        FAILED                     = 3;
+    }
+}

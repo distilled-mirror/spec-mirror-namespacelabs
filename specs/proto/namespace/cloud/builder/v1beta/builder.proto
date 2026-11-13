@@ -1,0 +1,269 @@
+syntax = "proto3";
+
+package namespace.cloud.builder.v1beta;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/cloud/compute/v1beta/compute.proto";
+import "proto/namespace/stdlib/time/date.proto";
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/builder/v1beta";
+
+// BuilderService allows the creation, and management of remote builders backed by Namespace compute.
+// Builder instances are used to build container images remotely with persistent caching.
+//
+// See https://namespace.so/docs/solutions/docker-builders for an overview.
+//
+// ## Access
+//
+// BuilderService is segregated into isolated regions for fault tolerance.
+// Reach out to Namespace team at support@namespace.so
+// for a list of available regions.
+//
+// ```
+// https://{region}.compute.namespaceapis.com:443
+// # E.g.:
+// https://eu.compute.namespaceapis.com:443
+// https://us.compute.namespaceapis.com:443
+// ```
+//
+// See [the overview](https://buf.build/namespace/cloud) for examples accessing
+// the API from the console.
+//
+// ## SDKs and Examples
+//
+// **Go SDK**: [namespacelabs.dev/integrations](https://github.com/namespacelabs/integrations) —
+// provides ready-to-use gRPC clients and authentication helpers.
+//
+// **TypeScript SDK**: [@namespacelabs/sdk](https://github.com/namespacelabs/typescript-sdk) —
+// provides typed clients, authentication, and token management for Node.js.
+//
+// **Examples** (Go):
+// [build](https://github.com/namespacelabs/examples/tree/master/go/build),
+// [buildandrun](https://github.com/namespacelabs/examples/tree/master/go/buildandrun).
+//
+// ## Authentication
+//
+// Calls to the BuilderService require a *tenant token* or a *workload token*
+// passed as a Bearer token as part of each call. These are always required.
+//
+// A *tenant token* identifies both the workspace that the call operates on, but
+// may also constrain the set of actions that the caller may do.
+//
+// A *workload token* identifies a running instance, and the workspace it is
+// running in. Each running instance has a workload token, which is
+// automatically made available to services running inside the instance.
+//
+// A *tenant token* can be obtained using the
+// [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta).
+service BuilderService {
+    // Creates a builder for the specified platform for the specified tenant, or
+    // returns an existing one if one is already running.
+    rpc EnsureBuildInstance(EnsureBuildInstanceRequest) returns (EnsureBuildInstanceResponse);
+
+    // Get the build record for a single build reference.
+    rpc GetBuildRecord(GetBuildRecordRequest) returns (BuildRecord);
+
+    // Lists all known builds.
+    rpc ListBuilds(ListBuildsRequest) returns (stream ListBuildsChunk);
+
+    // Returns build usage for a specified period.
+    rpc GetBuilderUsage(GetBuilderUsageRequest) returns (GetBuilderUsageResponse);
+
+    // Returns the configuration of a builder.
+    rpc GetBuilderConfiguration(GetBuilderConfigurationRequest) returns (GetBuilderConfigurationResponse);
+}
+
+message EnsureBuildInstanceRequest {
+    // The target platform for the builder, e.g. "linux/amd64" or "linux/arm64".
+    string platform = 1;
+
+    // Experimental - please talk to the Namespace team before using.
+    string experimental_consistency_key = 2;
+
+    ExperimentalFeatures experimental = 3;
+
+    message ExperimentalFeatures {
+        namespace.cloud.compute.v1beta.InstanceShape shape = 1;
+
+        int64 cache_size_mb = 2;
+
+        string builder_name = 3;
+
+        string sku = 4;
+
+        // Allows specifying a custom cache tag to allow sharing caches between differently named builders.
+        string cache_identity = 5;
+    }
+}
+
+message EnsureBuildInstanceResponse {
+    // The compute instance ID backing the builder.
+    string instance_id = 1;
+    // The BuildKit endpoint to connect to.
+    string endpoint = 2;
+    // How the connection to the builder endpoint is encapsulated.
+    Encapsulation encapsulation = 3;
+    // Which authentication method the builder endpoint requires.
+    Authentication authentication = 4;
+    // The deadline of the compute instance backing the builder.
+    google.protobuf.Timestamp deadline = 5;
+}
+
+// Describes how the connection to a builder endpoint is encapsulated.
+enum Encapsulation {
+    ENCAPSULATION_UNKNOWN = 0;
+    // Direct connection, no encapsulation.
+    NONE = 1;
+    // Connection is tunneled over a WebSocket-based TCP proxy.
+    WEBSOCKET_TCPPROXY = 2;
+}
+
+// Describes which authentication method a builder endpoint requires.
+enum Authentication {
+    AUTHENTICATION_UNKNOWN = 0;
+    // Authenticate using a Bearer token in the request header.
+    BEARER_TOKEN = 1;
+    // Authenticate using mutual TLS client certificates.
+    MTLS = 2;
+}
+
+message GetBuildRecordRequest {
+    string build_ref = 1;
+}
+
+message ListBuildsRequest {
+    // Optional.
+    int64 max_entries = 1;
+
+    // Optional.
+    google.protobuf.Timestamp older_than = 2;
+
+    // Optional.
+    google.protobuf.Timestamp not_older_than = 3;
+}
+
+message ListBuildsChunk {
+    repeated BuildRecord build = 1;
+}
+
+message BuildRecord {
+    // An opaque identifier for this build.
+    string build_ref = 1;
+    // Timestamp of when the build started (in UTC).
+    google.protobuf.Timestamp started_at = 2;
+    // Timestamp of when the build completed (in UTC). Not set if the build is
+    // still in progress.
+    google.protobuf.Timestamp completed_at = 3;
+    // The outcome of the build.
+    Status status = 4;
+    // Details about the machine that executed this build.
+    BuildMachine build_machine = 5;
+
+    enum Status {
+        STATUS_UNKNOWN = 0;
+        SUCCEEDED      = 1;
+        FAILED         = 2;
+    }
+}
+
+message BuildMachine {
+    // The compute instance ID that hosted this build.
+    string instance_id = 1;
+    // The instance shape (CPU, memory) used for this build.
+    namespace.cloud.compute.v1beta.InstanceShape shape = 2;
+    // If true, the build was executed locally and did not use remote builders.
+    bool local = 3;
+}
+
+message GetBuilderUsageRequest {
+    // Required
+    namespace.stdlib.time.Date period_start = 1;
+
+    // Optional; if not set, defaults to now.
+    namespace.stdlib.time.Date period_end = 2;
+}
+
+message GetBuilderUsageResponse {
+    repeated PerDay per_day = 1;
+    Usage           total   = 2;
+
+    // Usage which the system is aware of, but which has not been finalized yet.
+    Usage pending_total = 3;
+
+    message PerDay {
+        namespace.stdlib.time.Date date  = 1;
+        Usage                      usage = 2;
+        // Usage which the system is aware of, but which has not been finalized yet.
+        // When finalized, parts of this usage or all of this usage can still move to other days.
+        Usage pending_usage = 3;
+    }
+
+    message Usage {
+        int64 build_count        = 1;
+        int64 build_wall_minutes = 2;
+        int64 build_unit_minutes = 3;
+    }
+}
+
+message GetBuilderConfigurationRequest {
+    // E.g. linux/amd64, linux/arm64.
+    string platform = 1;
+    // Skip pre-spawning builder instances.
+    bool skip_builder_pre_spawn = 2;
+    // If true, returns new mTLS credentials to access the builder instance.
+    bool return_new_credentials = 3;
+
+    // Targets a specific remote builder. The name must be max 32 characters long
+    // and match the regular expression `^[a-z][a-z0-9_-]*$`.
+    // Optional.
+    string builder_name = 4;
+
+    // Shape of the remote builder instance. Optional - overrides the default if given.
+    namespace.cloud.compute.v1beta.InstanceShape builder_shape = 5;
+
+    // If given, overrides the default cache volume size of the remote builder.
+    // Usable values are constrained by policy.
+    int64 cache_size_mb = 6;
+
+    // JSON serialized set of experimental values. Reach out to the Namespace
+    // team for more details.
+    string experimental = 7;
+}
+
+message GetBuilderConfigurationResponse {
+    // The instance shape (CPU, memory) of the builder.
+    namespace.cloud.compute.v1beta.InstanceShape shape = 1;
+
+    // The size of the builder's cache volume in megabytes.
+    int64 cache_size_mb = 6;
+
+    // The endpoint to connect to (e.g. for the buildx remote driver).
+    string buildkit_endpoint = 2;
+
+    // The endpoint to connect to (e.g. for the buildx remote driver).
+    // Including protocol prefix (e.g. tcp:// ) and port (e.g. :443)
+    string full_buildkit_endpoint = 4;
+
+    // The PEM-encoded CA certificate(s) that should be used to verify server
+    // certificates of Namespace services that accept the issued client certificate.
+    // The PEM container will contain one or more PEM "CERTIFICATE" blocks.
+    string server_ca_pem = 3;
+
+    // Only set if `return_new_credentials` was true.
+    BuilderCredentials credentials = 5;
+}
+
+message BuilderCredentials {
+    // The PEM-encoded client certificate that has been issued. The PEM
+    // container will contain one or more PEM "CERTIFICATE" blocks. If multiple
+    // certificates are returned, they can be used to build a certificate chain
+    // to a server-requested Certification Authority.
+    string client_certificate_pem = 1;
+
+    // This field will be a PEM container with exactly one "PRIVATE KEY" block.
+    string private_key_pem = 2;
+
+    // Timestamp at which these credentials expire (in UTC).
+    google.protobuf.Timestamp expires_at = 3;
+}

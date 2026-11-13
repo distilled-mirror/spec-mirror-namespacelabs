@@ -1,0 +1,324 @@
+syntax = "proto3";
+
+package namespace.cloud.testing.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/testing/v1beta";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/stdlib/labels.proto";
+
+// TestResultsService allows the submission and retrieval of test results.
+// This service is designed to be framework-agnostic and supports various test
+// runners including go test, pytest, jest, etc.
+//
+// ## Access
+//
+// TestResultsService is regionalized for fault tolerance.
+// Reach out to Namespace team at support@namespace.so
+// for a list of available regions.
+//
+// ```
+// https://{region}.compute.namespaceapis.com:443
+// # E.g.:
+// https://eu.compute.namespaceapis.com:443
+// https://us.compute.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls to the TestResultsService require a *tenant token* or a *workload token*
+// passed as a Bearer token as part of each call. These are always required.
+//
+// A *tenant token* identifies both the workspace that the call operates on, but
+// may also constrain the set of actions that the caller may do.
+//
+// A *workload token* identifies a running instance, and the workspace it is
+// running in. Each running instance has a workload token, which is
+// automatically made available to services running inside the instance.
+//
+// A *tenant token* can be obtained using the
+// [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta).
+service TestResultsService {
+    // Creates a new test run and returns a run ID for subsequent operations.
+    rpc CreateTestRun(CreateTestRunRequest) returns (CreateTestRunResponse);
+
+    // Pushes test results for a target, including start, logs, and completion.
+    // Supports idempotent log insertion via client-provided log IDs.
+    rpc PushTestResult(stream PushTestResultRequest) returns (PushTestResultResponse);
+
+    // Retrieves logs for a test target.
+    rpc StreamTestLogs(StreamTestLogsRequest) returns (stream StreamTestLogsChunk);
+
+    // Marks a test run as complete.
+    rpc CompleteTestRun(CompleteTestRunRequest) returns (google.protobuf.Empty);
+
+    // Retrieves information about a test run.
+    rpc GetTestRun(GetTestRunRequest) returns (TestRun);
+
+    // Lists test runs with optional filtering.
+    rpc ListTestRuns(ListTestRunsRequest) returns (stream ListTestRunsChunk);
+
+    // Lists test results for a specific test run.
+    rpc ListTestResults(ListTestResultsRequest) returns (stream ListTestResultsChunk);
+}
+
+message CreateTestRunRequest {
+    // Optional identifier for the test run (e.g., commit SHA, build ID).
+    string run_identifier = 1;
+
+    // Optional user-provided labels for the test run.
+    repeated namespace.stdlib.Label labels = 2;
+
+    // Optional environment information.
+    TestEnvironment environment = 3;
+}
+
+message CreateTestRunResponse {
+    string run_id = 1;
+}
+
+message TestEnvironment {
+    // E.g., "linux/amd64", "darwin/arm64"
+    string platform = 1;
+
+    // E.g., "go1.21.0", "python3.11"
+    string runtime_version = 2;
+
+    // Optional environment variables or configuration.
+    map<string, string> properties = 3;
+}
+
+message PushTestResultRequest {
+    // The run ID returned from CreateTestRun.
+    string run_id = 1;
+
+    // The test target being reported (e.g., package path, test suite name).
+    string target = 2;
+
+    oneof event {
+        // Signals that a test target has started.
+        TestTargetStarted started = 3;
+
+        // Log entries produced during test execution.
+        TestLogBatch logs = 4;
+
+        // Test case results reported incrementally as they complete.
+        TestCaseBatch test_cases = 5;
+
+        // Signals that a test target has completed.
+        TestTargetCompleted completed = 6;
+    }
+}
+
+message TestTargetStarted {
+    // When the target started execution.
+    google.protobuf.Timestamp started_at = 1;
+
+    // Optional user-provided labels for this target.
+    repeated namespace.stdlib.Label labels = 2;
+}
+
+message TestLogBatch {
+    // Log entries with client-provided IDs for idempotency.
+    repeated TestLogEntry entries = 1;
+}
+
+message TestCaseBatch {
+    // Test case results reported incrementally.
+    repeated TestCase test_cases = 1;
+}
+
+message TestTargetCompleted {
+    // Overall status for this target.
+    TestStatus status = 1;
+
+    // When the target completed execution.
+    google.protobuf.Timestamp completed_at = 2;
+
+    // Optional user-provided labels for this target.
+    repeated namespace.stdlib.Label labels = 3;
+}
+
+message PushTestResultResponse {
+    // The test result ID, returned when available (after started event).
+    string result_id = 1;
+}
+
+message TestCase {
+    // Name of the test case (e.g., "TestFooBar", "test_user_creation").
+    string name = 1;
+
+    // Status of this test case.
+    TestStatus status = 2;
+
+    // When the test case started execution.
+    google.protobuf.Timestamp started_at = 3;
+
+    // When the test case completed execution.
+    google.protobuf.Timestamp completed_at = 4;
+
+    // Optional error message if the test failed.
+    string error_message = 5;
+
+    // Optional stack trace or detailed failure information.
+    string failure_details = 6;
+
+    // Optional user-provided labels (e.g., subtest information, parameters).
+    repeated namespace.stdlib.Label labels = 7;
+}
+
+enum TestStatus {
+    TEST_STATUS_UNKNOWN = 0;
+    TEST_STATUS_PASSED = 1;
+    TEST_STATUS_FAILED = 2;
+    TEST_STATUS_SKIPPED = 3;
+    // For targets that didn't complete due to build errors, timeouts, etc.
+    TEST_STATUS_ERROR = 4;
+}
+
+
+message TestLogEntry {
+    // Client-provided unique ID for idempotent insertion.
+    string id = 1;
+
+    google.protobuf.Timestamp timestamp = 2;
+
+    // E.g., "stdout", "stderr"
+    string stream = 3;
+
+    // The log content.
+    string content = 4;
+}
+
+message LogEntry {
+    google.protobuf.Timestamp timestamp = 1;
+
+    // E.g., "stdout", "stderr"
+    string stream = 2;
+
+    // The log content.
+    string content = 3;
+}
+
+
+message StreamTestLogsRequest {
+    // The run ID for this test run.
+    string run_id = 1;
+
+    // The test target to retrieve logs for.
+    string target = 2;
+}
+
+message StreamTestLogsChunk {
+    repeated LogEntry entries = 1;
+}
+
+message CompleteTestRunRequest {
+    // The run ID to mark as complete.
+    string run_id = 1;
+
+    // Overall status of the test run.
+    TestRunStatus status = 2;
+
+    // Optional summary information.
+    TestRunSummary summary = 3;
+
+    // Optional completed timestamp. If not provided, defaults to now.
+    google.protobuf.Timestamp completed_at = 4;
+}
+
+message TestRunSummary {
+    int32 total_targets = 1;
+    int32 passed_targets = 2;
+    int32 failed_targets = 3;
+    int32 skipped_targets = 4;
+    int32 error_targets = 5;
+
+    int32 total_test_cases = 6;
+    int32 passed_test_cases = 7;
+    int32 failed_test_cases = 8;
+    int32 skipped_test_cases = 9;
+
+    google.protobuf.Duration total_duration = 10;
+}
+
+enum TestRunStatus {
+    TEST_RUN_STATUS_UNKNOWN = 0;
+    TEST_RUN_STATUS_IN_PROGRESS = 1;
+    TEST_RUN_STATUS_COMPLETED = 2;
+    TEST_RUN_STATUS_FAILED = 3;
+    TEST_RUN_STATUS_CANCELLED = 4;
+}
+
+
+message GetTestRunRequest {
+    string run_id = 1;
+}
+
+message TestRun {
+    string run_id = 1;
+    string run_identifier = 2;
+
+    TestRunStatus status = 3;
+
+    google.protobuf.Timestamp created_at = 4;
+    google.protobuf.Timestamp completed_at = 5;
+
+    TestEnvironment environment = 6;
+    TestRunSummary summary = 7;
+
+    map<string, string> metadata = 8;
+}
+
+message ListTestRunsRequest {
+    // Optional: filter by run identifier (e.g., commit SHA).
+    string run_identifier = 1;
+
+    // Optional: filter by status.
+    TestRunStatus status = 2;
+
+    // Optional: maximum number of entries to return.
+    int32 max_entries = 3;
+
+    // Optional: only return runs created after this time.
+    google.protobuf.Timestamp created_after = 4;
+
+    // Optional: only return runs created before this time.
+    google.protobuf.Timestamp created_before = 5;
+}
+
+message ListTestRunsChunk {
+    repeated TestRun runs = 1;
+}
+
+message ListTestResultsRequest {
+    // The run ID to list results for.
+    string run_id = 1;
+
+    // Optional: filter by target pattern (supports wildcards).
+    string target_pattern = 2;
+
+    // Optional: filter by status.
+    TestStatus status = 3;
+}
+
+message ListTestResultsChunk {
+    repeated TestResult results = 1;
+}
+
+message TestResult {
+    string run_id = 1;
+    string target = 2;
+
+    TestStatus status = 3;
+
+    google.protobuf.Timestamp started_at = 4;
+    google.protobuf.Timestamp completed_at = 5;
+    google.protobuf.Duration duration = 6;
+
+    repeated TestCase test_cases = 7;
+
+    map<string, string> metadata = 8;
+}

@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package namespace.private.images.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/private/images";
+
+import "google/protobuf/timestamp.proto";
+
+// BaseImage describes a Namespace-managed image that is used by one of the various applications built on top of the platform.
+// The same schema is used to define base images used by Linux, and by MacOS.
+message BaseImage {
+    // Base Image unique identifier.
+    string id = 8;
+    // Deprecated. Use id instead.
+    string ref = 1;
+    // Corresponds to InstanceShape.os ("linux" or "macos").
+    string os = 2;
+    // E.g. Sonoma, Ubuntu LTS
+    string os_name = 3;
+    // E.g. 14.4.1
+    string os_version = 4;
+    // E.g. 23H124
+    string os_build = 13;
+    // A description used for administration purposes.
+    string description = 5;
+    // When the image was last updated.
+    google.protobuf.Timestamp updated_at = 6;
+    // The set of software packages that are included; e.g.
+    // Docker, Rust, Java, Podman, etc.
+    repeated Package packages = 7;
+    // The set of software package versions that are set to be default.
+    repeated Package default_packages = 11;
+    // Whether this image includes pre-release software.
+    // Whether this is a production image, or an image being canaried.
+    ReleaseStage release_stage = 9;
+    // Set of features that the image supports.
+    repeated string features = 10;
+
+    DeprecatedReleaseChannel release_channel = 12 [deprecated = true];
+
+    message Caveat {
+        string text     = 1;
+        string link_url = 2;
+    }
+
+    repeated Caveat caveats = 14;
+}
+
+enum ReleaseStage {
+    STAGE_UNKNOWN = 0;
+    PRODUCTION    = 1;
+    CANARY        = 2;
+}
+
+enum DeprecatedReleaseChannel {
+    CHANNEL_UNKNOWN = 0;
+    STABLE          = 1;
+    EDGE            = 2;
+}
+
+message Package {
+    // E.g. "Xcode", "iOS SDK", aws-cli, Rust, Docker, etc.
+    string name = 1;
+    // Type of installation (e.g. system, pre-installed for Ubuntu or simruntime, Xcode for MacOS)
+    string type = 2;
+    // E.g. 14.3
+    string version = 3;
+    // Build number, e.g. 16B5100e.
+    string build = 4;
+    // Whether this version is the default for the product (e.g. for Xcode).
+    bool is_default = 5;
+}
+
+message ResolvedBaseImage {
+    // Specification of Base Image.
+    BaseImage spec = 1;
+
+    // Status of Base Image.
+    BaseImageStatus status = 2;
+}
+
+message BaseImageStatus {
+    // Operating-system dependent image reference.
+    string image_ref = 1;  // Deprecated, use image_repository and image_digest
+
+    // When the image was last built.
+    google.protobuf.Timestamp built_at = 2;
+
+    // Do not prewarm this image on nodes, but keep this record for information.
+    bool skip_prewarming = 9;
+
+    // Image registry hostname. E.g. "public.registry.namespace.systems".
+    string image_registry = 8;
+    // Image repository *without* the registry hostname. E.g. "namespacelabs.dev/internal/service/githubrunner/container/ubuntu2404".
+    string image_repository = 6;
+    // Image digest. E.g. "sha256:2036fae18ddb748e5482d9a0c22543e638f99f7e15a0a131a71b6d8d5da5c753"
+    string image_digest = 7;
+}

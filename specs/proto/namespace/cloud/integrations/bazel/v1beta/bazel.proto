@@ -1,0 +1,290 @@
+syntax = "proto3";
+
+package namespace.cloud.integrations.bazel.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/integrations/bazel/v1beta";
+
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/cloud/integrations/bazel/v1beta/invocation_report.proto";
+
+// BazelCacheService provides access to Namespace's managed Bazel remote cache.
+// The cache accelerates builds by storing and retrieving build artifacts.
+// See https://namespace.so/docs/integrations/bazel for an overview.
+//
+// ## Access
+//
+// This service is available at the global endpoint:
+// ```
+// https://global.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls require a *tenant token* passed as a Bearer token.
+// See the [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta)
+// for obtaining tokens.
+service BazelCacheService {
+    // Returns cache configuration for the caller's environment.
+    // Creates necessary resources if they don't exist.
+    rpc EnsureBazelCache(EnsureBazelCacheRequest) returns (EnsureBazelCacheResponse);
+}
+
+// BazelService manages Namespace's Bazel remote execution integration.
+//
+// ## Access
+//
+// This service is available at the global endpoint:
+// ```
+// https://global.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls require a *tenant token* passed as a Bearer token.
+// See the [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta)
+// for obtaining tokens.
+service BazelService {
+    // Returns remote execution cluster configuration for the caller's environment.
+    // Creates necessary resources if they don't exist.
+    rpc EnsureCluster(EnsureClusterRequest) returns (EnsureClusterResponse);
+
+    // Returns remote cache configuration for the caller's environment.
+    // Creates necessary resources if they don't exist.
+    rpc EnsureStorageCluster(EnsureStorageClusterRequest) returns (EnsureStorageClusterResponse);
+
+    // Lists Bazel invocations for the caller's tenant, newest first.
+    rpc ListInvocations(ListInvocationsRequest) returns (ListInvocationsResponse);
+
+    // Streams a deterministic report for a Bazel invocation.
+    rpc StreamInvocationReport(StreamInvocationReportRequest) returns (stream StreamInvocationReportResponse);
+}
+
+message ListInvocationsRequest {
+    // The maximum number of invocations to return. Defaults to 50 and may not
+    // exceed 100.
+    int32 max_entries = 1;
+
+    // If a previous response returned a pagination_cursor, pass it here to
+    // continue listing invocations. The cursor preserves the time filters from
+    // the original request; not_older_than and older_than are ignored when it
+    // is set.
+    bytes pagination_cursor = 2;
+
+    // Don't return invocations that started before this timestamp.
+    google.protobuf.Timestamp not_older_than = 3;
+
+    // Only return invocations that started before this timestamp.
+    google.protobuf.Timestamp older_than = 4;
+}
+
+message ListInvocationsResponse {
+    // Invocations matching the request filters, ordered newest first.
+    repeated InvocationListEntry invocations = 1;
+
+    // If set, there are additional invocations. Pass this cursor to a
+    // subsequent ListInvocations call to continue listing them.
+    bytes pagination_cursor = 2;
+}
+
+message InvocationListEntry {
+    // The Bazel invocation identifier reported to the build event service.
+    string invocation_id = 1;
+
+    // The build identifier reported to the build event service.
+    string build_id = 2;
+
+    // The project identifier reported to the build event service.
+    string project_id = 3;
+
+    // When the invocation started.
+    google.protobuf.Timestamp started_at = 4;
+
+    // When the invocation completed. Unset while it is still running.
+    google.protobuf.Timestamp completed_at = 5;
+
+    // The Bazel command that started the invocation (e.g. "build", "test").
+    string command = 6;
+
+    // The target patterns passed to the invocation (e.g. "//foo:bar").
+    repeated string target_patterns = 7;
+}
+
+message StreamInvocationReportRequest {
+    // The Bazel invocation identifier reported to the build event service.
+    string invocation_id = 1;
+}
+
+message EnsureBazelCacheRequest {
+    // A key to identify the purpose. Currently 'ci' or 'workstation' are supported.
+    string key = 1;
+
+    // Cache version number.
+    int64 version = 2;
+
+    // Optional site preference (e.g., "iad", "ord"). If not set, the site is
+    // determined from the caller's location or workload context.
+    string site = 3;
+
+    // When true, the returned response will include a remote asset endpoint
+    // suitable for use with bazel's `--experimental_remote_downloader`.
+    bool enable_remote_asset_api = 4;
+
+    // Experimental: request a direct mTLS endpoint that terminates TLS at ingress
+    // and forwards to the cache's plaintext gRPC backend.
+    bool experimental_direct_mtls = 5;
+
+    // Experimental: suffix appended to the backing cache volume name and unique tag.
+    string experimental_cache_name = 6;
+}
+
+message EnsureBazelCacheResponse {
+    // The gRPC endpoint to connect to (e.g., `bazel build --remote_cache=<endpoint>`).
+    // Format: [protocol://]host:port
+    string cache_endpoint = 1;
+
+    // An endpoint for HTTPS access to the cache with client certificate authentication.
+    // Format: https://host:port
+    string https_mtls_cache_endpoint = 5;
+
+    // An endpoint for HTTPS access to the cache with header-based authentication.
+    // Format: https://host:port
+    string https_cache_endpoint = 6;
+
+    // The PEM-encoded CA certificate(s) that should be used to verify server
+    // certificates of Namespace services that accept the issued client certificate.
+    // The PEM container will contain one or more PEM "CERTIFICATE" blocks.
+    string server_ca_pem = 2;
+
+    // The PEM-encoded client certificate that can be used by Bazel to connect to the cache.
+    string client_cert_pem = 3;
+
+    // The PEM-encoded client key that can be used by Bazel to connect to the cache.
+    string client_key_pem = 4;
+
+    // Until when is the returned cache configuration usable.
+    google.protobuf.Timestamp expires_at = 7;
+
+    // For which domains the credential helper should be enabled.
+    // An empty list means that we do not use the credential helper.
+    repeated string credential_helper_domains = 8;
+
+    // A gRPC endpoint where we can send the build events to (e.g., `bazel build --bes_backend=<endpoint>`).
+    // Format: [protocol://]host:port
+    string build_event_endpoint = 9;
+
+    // A remote asset endpoint to use with bazel's `--experimental_remote_downloader`.
+    // Format: [protocol://]host:port
+    string remote_asset_endpoint = 10;
+
+    // Set to true when the returned cache endpoint expects workload mTLS
+    // (i.e. the request set experimental_direct_mtls).
+    bool use_workload_mtls = 11;
+}
+
+// Controls which authentication mode the returned cluster endpoints expect.
+enum BazelExecutionAuthMode {
+    // Unspecified; the server defaults to mTLS for backwards compatibility.
+    BAZEL_EXECUTION_AUTH_MODE_UNSPECIFIED = 0;
+    // Endpoints expect an mTLS client certificate (port 444).
+    BAZEL_EXECUTION_AUTH_MODE_MTLS = 1;
+    // Endpoints expect a static bearer token in the ingress auth header against
+    // the public endpoints (port 443); mTLS endpoints are not exposed.
+    BAZEL_EXECUTION_AUTH_MODE_STATIC = 2;
+}
+
+message EnsureClusterRequest {
+    // Stable identifier that disambiguates multiple parallel execution clusters
+    // for the same tenant. Used to derive the unique tags. Defaults to
+    // "default" when empty. Must be a valid DNS subdomain segment.
+    string key = 1;
+    // Authentication mode the client intends to use. Determines which endpoints
+    // are returned. Defaults to mTLS when unset.
+    BazelExecutionAuthMode auth_mode = 2;
+    // When true, the returned response includes a remote asset endpoint
+    // suitable for use with bazel's `--experimental_remote_downloader`. The
+    // backing storage instance always serves the remote asset API; this flag
+    // only controls whether the endpoint is surfaced to the client.
+    bool enable_remote_asset_api = 3;
+}
+
+message EnsureClusterResponse {
+    // gRPC endpoint clients use to reach the scheduler. Authentication matches
+    // the requested auth_mode: an mTLS client certificate (port 444) by
+    // default, or a static bearer token against the public endpoint (port 443)
+    // when static auth was requested. Empty for storage-only access.
+    // Format: [protocol://]host:port
+    string scheduler_endpoint = 1;
+    // gRPC endpoint clients use to reach the storage instance, with the same
+    // authentication semantics as scheduler_endpoint.
+    // Format: [protocol://]host:port
+    string storage_endpoint = 2;
+
+    // Recommended value for Bazel's `--jobs` flag.
+    uint32 recommended_bazel_jobs = 3;
+    // Recommended value for Bazel's `--remote_timeout` flag, in seconds.
+    uint32 recommended_bazel_remote_timeout_seconds = 4;
+    // Recommended value for Bazel's `--remote_local_fallback` flag.
+    bool recommended_bazel_remote_local_fallback = 5;
+    // Recommended value for Bazel's `--remote_download_outputs` flag.
+    string recommended_bazel_remote_download_outputs = 6;
+
+    // A gRPC endpoint where build events can be sent to (e.g. `bazel build --bes_backend=<endpoint>`).
+    // Empty when build event ingestion is not enabled for the tenant.
+    // Format: [protocol://]host:port
+    string build_event_endpoint = 7;
+
+    // For which domains the credential helper should be enabled. Used to
+    // authenticate build event uploads in the default (mTLS) auth mode, where
+    // the client certificate cannot authenticate the bearer-only build event
+    // endpoint. Empty when build event ingestion is not enabled for the tenant.
+    repeated string credential_helper_domains = 8;
+
+    // A remote asset endpoint to use with bazel's
+    // `--experimental_remote_downloader`. Authentication matches the requested
+    // auth_mode, like scheduler_endpoint and storage_endpoint. Only set when
+    // the request set enable_remote_asset_api. Format: [protocol://]host:port
+    string remote_asset_endpoint = 9;
+
+    // Base URL where Bazel can link to uploaded build event results (e.g.
+    // `bazel build --bes_results_url=<url>`). Empty when build event ingestion
+    // is not enabled for the tenant.
+    string build_event_results_url = 10;
+}
+
+message EnsureStorageClusterRequest {
+    // Stable identifier shared with the corresponding execution cluster.
+    // Defaults to "default" when empty. Must be a valid DNS subdomain segment.
+    string key = 1;
+    // Authentication mode the client intends to use. Determines which endpoint
+    // is returned. Defaults to mTLS when unset.
+    BazelExecutionAuthMode auth_mode = 2;
+    // When true, the returned response includes a remote asset endpoint when
+    // the resolved storage access mode is read-write.
+    bool enable_remote_asset_api = 3;
+    // Requested storage access. Read-write requires bazel/storage write access.
+    // Read-only requires bazel/storage read or write access. When unset, access
+    // is derived from the caller's permissions for backwards compatibility.
+    BazelStorageAccessMode access_mode = 4;
+}
+
+enum BazelStorageAccessMode {
+    BAZEL_STORAGE_ACCESS_MODE_UNSPECIFIED = 0;
+    BAZEL_STORAGE_ACCESS_MODE_READ_ONLY   = 1;
+    BAZEL_STORAGE_ACCESS_MODE_READ_WRITE  = 2;
+}
+
+message EnsureStorageClusterResponse {
+    // gRPC endpoint clients use to reach the storage instance with the resolved
+    // access mode. Format: [protocol://]host:port
+    string storage_endpoint = 1;
+    // A remote asset endpoint to use with Bazel's
+    // `--experimental_remote_downloader`. Only set for read-write access when
+    // the request set enable_remote_asset_api. Format: [protocol://]host:port
+    string remote_asset_endpoint = 2;
+    // Recommended value for Bazel's `--remote_upload_local_results` flag.
+    bool recommended_bazel_remote_upload_local_results = 3;
+    // A gRPC endpoint where build events can be sent.
+    string build_event_endpoint = 4;
+    // Base URL where Bazel can link to uploaded build event results.
+    string build_event_results_url = 5;
+}

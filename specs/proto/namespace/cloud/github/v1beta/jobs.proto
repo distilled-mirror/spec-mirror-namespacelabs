@@ -1,0 +1,158 @@
+syntax = "proto3";
+
+package namespace.cloud.github.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/github/v1beta";
+
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/stdlib/matchers.proto";
+
+// JobsService provides access to GitHub Actions job information.
+//
+// ## Access
+//
+// This service is available at the global endpoint:
+// ```
+// https://global.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls require a *tenant token* passed as a Bearer token.
+// See the [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta)
+// for obtaining tokens.
+service JobsService {
+    // Lists GitHub Actions jobs matching the specified filters.
+    rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+
+    // Describes a single GitHub Actions job by its job ID, including the
+    // runner and compute instance it was assigned to.
+    rpc DescribeJob(DescribeJobRequest) returns (DescribeJobResponse);
+}
+
+// ListJobsRequest specifies filters for listing GitHub Actions jobs.
+message ListJobsRequest {
+    // If a previous response returned a `pagination_cursor`, it can be
+    // specified to continue reading results with the same arguments as the
+    // original call.
+    bytes pagination_cursor = 1;
+
+    // The maximum number of entries to return. We won't return more than
+    // `max_entries`, but may return fewer.
+    int64 max_entries = 2;
+
+    // Filter jobs by time range (based on created_at timestamp).
+    namespace.stdlib.TimestampRange time_range = 3;
+
+    // Filter jobs by conclusion (e.g., "success", "failure", "cancelled").
+    // Only applies to completed jobs.
+    namespace.stdlib.StringMatcher conclusion = 4;
+
+    // Filter jobs by repository name (e.g., "owner/repo").
+    namespace.stdlib.StringMatcher repository = 5;
+
+    // Filter jobs by the GitHub login of the user who triggered the workflow.
+    namespace.stdlib.StringMatcher sender_login = 6;
+
+    // If true, only return jobs that have not started yet (i.e., started_at is not set).
+    bool has_not_started = 7;
+
+    // If true, only return jobs that have not finished yet (i.e., completed_at is not set).
+    bool has_not_finished = 8;
+}
+
+// ListJobsResponse contains the list of jobs matching the request filters.
+message ListJobsResponse {
+    // List of jobs matching the filters.
+    repeated Job jobs = 1;
+
+    // If set, there are additional results. Pass the same cursor to a
+    // subsequent ListJobs call to continue fetching results.
+    bytes pagination_cursor = 2;
+}
+
+// DescribeJobRequest identifies a single GitHub Actions job to describe.
+message DescribeJobRequest {
+    // The GitHub Actions job ID to describe. This is the numeric identifier
+    // visible in the GitHub job URL (e.g., ".../job/1234567890").
+    int64 job_id = 1;
+}
+
+// DescribeJobResponse contains the described job.
+message DescribeJobResponse {
+    // The described job, including runner and compute instance information.
+    Job job = 1;
+}
+
+// Job represents a GitHub Actions workflow job.
+message Job {
+    // Tenant ID that owns this job.
+    string tenant_id = 16;
+
+    // Unique identifier for the job.
+    int64 job_id = 1;
+
+    // Repository in "owner/repo" format.
+    string repository = 2;
+
+    // GitHub workflow run ID.
+    int64 run_id = 3;
+
+    // Name of the workflow as defined in the workflow file.
+    string workflow_name = 4;
+
+    // Name of the job as defined in the workflow file.
+    string job_name = 5;
+
+    // Job conclusion (e.g., "success", "failure", "cancelled").
+    // Only set when the job has completed.
+    string conclusion = 6;
+
+    // URL to view the job on GitHub.
+    string job_url = 7;
+
+    // GitHub login of the user who triggered the workflow.
+    string sender_login = 8;
+
+    // Branch or tag ref that triggered the workflow.
+    string ref = 9;
+
+    // When the job was created on GitHub.
+    google.protobuf.Timestamp created_at = 10;
+
+    // When the job was queued for execution.
+    google.protobuf.Timestamp queued_at = 11;
+
+    // When the job started executing.
+    google.protobuf.Timestamp started_at = 12;
+
+    // When the job completed.
+    google.protobuf.Timestamp completed_at = 13;
+
+    // Runner information, if assigned.
+    RunnerInfo runner = 14;
+
+    // Runner profile used for this job.
+    ProfileRef profile = 15;
+}
+
+// RunnerInfo contains information about the runner executing the job.
+message RunnerInfo {
+    // Unique identifier for the runner.
+    int64 runner_id = 1;
+
+    // Name of the runner.
+    string runner_name = 2;
+
+    // Instance ID of the underlying compute instance.
+    string instance_id = 3;
+
+    // Container name within the instance (Linux runners only).
+    string container_name = 4;
+}
+
+// ProfileRef references a runner profile.
+message ProfileRef {
+    // Profile tag as defined in the runner profile configuration.
+    string tag = 1;
+}

@@ -1,0 +1,1230 @@
+syntax = "proto3";
+
+package namespace.private.devbox.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/private/devbox";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "proto/namespace/stdlib/callback.proto";
+import "proto/namespace/stdlib/labels.proto";
+import "proto/namespace/stdlib/matchers.proto";
+import "proto/namespace/cloud/compute/v1beta/compute.proto";
+import "proto/namespace/cloud/compute/v1beta/storage.proto";
+
+service DevBoxService {
+    rpc Create(CreateRequest) returns (CreateResponse);
+    // Retained for backwards compatibility; use CreateFromBlueprint instead.
+    rpc CreateFromTemplate(CreateFromTemplateRequest) returns (CreateResponse);
+    rpc CreateFromBlueprint(CreateFromBlueprintRequest) returns (CreateResponse);
+    rpc CreateFromDevbox(CreateFromDevboxRequest) returns (CreateResponse);
+    rpc Activate(ActivateRequest) returns (ActivateResponse);
+    rpc StreamActivate(ActivateRequest) returns (stream ActivateResponseChunk);
+    rpc Update(UpdateRequest) returns (UpdateResponse);
+    rpc Expire(ExpireRequest) returns (ExpireResponse);
+    rpc Stop(StopRequest) returns (StopResponse);
+    rpc List(ListRequest) returns (ListResponse);
+    rpc GetUsage(GetUsageRequest) returns (GetUsageResponse);
+    rpc Fetch(FetchRequest) returns (FetchResponse);
+
+    rpc ListSnapshots(ListSnapshotsRequest) returns (ListSnapshotsResponse);
+
+    rpc AcquireLease(AcquireLeaseRequest) returns (AcquireLeaseResponse);
+    rpc ReleaseLease(ReleaseLeaseRequest) returns (ReleaseLeaseResponse);
+
+    // Retained for backwards compatibility; use CreateBlueprint instead.
+    rpc CreateTemplate(CreateTemplateRequest) returns (CreateTemplateResponse);
+    // Retained for backwards compatibility; use UpdateBlueprint instead.
+    rpc UpdateTemplate(UpdateTemplateRequest) returns (UpdateTemplateResponse);
+    // Retained for backwards compatibility; use FetchBlueprint instead.
+    rpc FetchTemplate(FetchTemplateRequest) returns (FetchTemplateResponse);
+    // Retained for backwards compatibility; use ListBlueprints instead.
+    rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse);
+    // Retained for backwards compatibility; use ExpireBlueprint instead.
+    rpc ExpireTemplate(ExpireTemplateRequest) returns (ExpireTemplateResponse);
+
+    rpc CreateBlueprint(CreateBlueprintRequest) returns (CreateBlueprintResponse);
+    // Fetch by spec.name, or create with the supplied parameters if missing.
+    // Existing blueprints are returned unchanged.
+    rpc EnsureBlueprint(EnsureBlueprintRequest) returns (EnsureBlueprintResponse);
+    rpc UpdateBlueprint(UpdateBlueprintRequest) returns (UpdateBlueprintResponse);
+    rpc FetchBlueprint(FetchBlueprintRequest) returns (FetchBlueprintResponse);
+    rpc ListBlueprints(ListBlueprintsRequest) returns (ListBlueprintsResponse);
+    rpc ExpireBlueprint(ExpireBlueprintRequest) returns (ExpireBlueprintResponse);
+
+    rpc WireImage(WireImageRequest) returns (WireImageResponse);
+    rpc OptimizeImage(OptimizeImageRequest) returns (stream OptimizeImageResponseChunk);
+    rpc ExpireImage(ExpireImageRequest) returns (ExpireImageResponse);
+    rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
+    rpc InspectImage(InspectImageRequest) returns (InspectImageResponse);
+    rpc DescribeImage(DescribeImageRequest) returns (DescribeImageResponse);
+
+    rpc ListComposableFeatures(ListComposableFeaturesRequest) returns (ListComposableFeaturesResponse);
+    rpc RegisterComposableFeature(RegisterComposableFeatureRequest) returns (RegisterComposableFeatureResponse);
+    rpc RemoveComposableFeature(RemoveComposableFeatureRequest) returns (RemoveComposableFeatureResponse);
+
+    rpc UpdateDefaults(UpdateDefaultsRequest) returns (UpdateDefaultsResponse);
+    rpc FetchDefaults(FetchDefaultsRequest) returns (FetchDefaultsResponse);
+
+    rpc CreateRepository(CreateRepositoryRequest) returns (CreateRepositoryResponse);
+
+    rpc CreateIntegration(CreateIntegrationRequest) returns (CreateIntegrationResponse);
+    rpc ListIntegrations(ListIntegrationsRequest) returns (ListIntegrationsResponse);
+    rpc DeleteIntegration(DeleteIntegrationRequest) returns (DeleteIntegrationResponse);
+
+    rpc BeginDevinOutpostConnect(BeginDevinOutpostConnectRequest) returns (BeginDevinOutpostConnectResponse);
+
+    rpc Ping(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+    rpc Metadata(MetadataRequest) returns (MetadataResponse);
+}
+
+enum AccessMode {
+    ACCESS_MODE_UNSPECIFIED = 0;
+    USER_PRIVATE            = 1;
+    TENANT_WIDE             = 2;
+}
+
+message HttpAccessMode {
+    // Fields are set to a non-nil value when enabled & to be enforced.
+    // Note, it is an error for none to be set
+    OwnerAccess  owner  = 1;
+    TenantAccess tenant = 2;
+    PublicAccess public = 3;
+
+    message OwnerAccess {}
+    message TenantAccess {}
+    message PublicAccess {}
+}
+
+message PortSpec {
+    string name   = 1;  // Optional.
+    uint32 number = 2;  // Must be 1-65535 and not use a Namespace-reserved port.
+    Kind   kind   = 3;  // KIND_UNSPECIFIED is invalid when persisted.
+
+    enum Kind {
+        KIND_UNSPECIFIED  = 0;
+        KIND_PORT_FORWARD = 1;
+        KIND_HTTP_INGRESS = 2;
+    }
+}
+
+message ServiceSpec {
+    string            name    = 1;
+    Command           command = 2;
+    repeated PortSpec ports   = 3;
+
+    message Command {
+        string          executable = 1;
+        repeated string args       = 2;
+        Cwd             cwd        = 3;
+    }
+
+    message Cwd {
+        string absolute           = 1;
+        string workspace_relative = 2;
+    }
+}
+
+enum PersistenceMode {
+    PERSISTENCE_MODE_UNSPECIFIED = 0; // Inherit the image's persistence setting.
+    PERSISTENCE_MODE_WORKSPACE = 1;
+    PERSISTENCE_MODE_WHOLE_SYSTEM = 2;
+}
+
+message CreateRequest {
+    string                                       name                 = 1;
+    string                                       image_ref            = 2;
+    namespace.cloud.compute.v1beta.InstanceShape instance_shape       = 3;
+    string                                       site                 = 5;
+    string                                       volume_name          = 8;
+    int64                                        volume_size_gb       = 9;
+    int64                                        cache_volume_size_gb = 10;
+    string                                       repository                  = 11;
+    repeated string                              private_features = 12;
+    // Deprecated: use features instead.
+    repeated string                              enabled_features = 13 [deprecated = true];
+    // Overrides default enabled features. Takes precedence over enabled_features.
+    // When unset, falls back to enabled_features or tenant defaults.
+    // When set with an empty enabled list, explicitly disables all features.
+    Features                                     features = 20;
+    // If set, looks up the image by name and resolves image_ref. Exclusive with image_ref.
+    string                                       image_name           = 14;
+    // If set, used as-is. Exclusive with repository.
+    VersionControlSpec                           version_control      = 15;
+    // If set, passed as the initial AgentRuntimeConfiguration.busy_ensure_minimum_duration at activation time.
+    google.protobuf.Duration                     busy_ensure_minimum_duration = 16;
+    // If unset, defaults to DevboxDefaults.access_mode.
+    AccessMode                                   access_mode                 = 17;
+    // Additional terminal sessions to create at startup.
+    repeated BlueprintSpec.SessionSpec           sessions                    = 18;
+    // Integrations to enable on the backing instance (e.g. Tailscale).
+    Integrations                                integrations                = 19;
+    // Free-form description of what this devbox is for.
+    string                                       documented_purpose          = 21;
+    // If set, marks the devbox as ephemeral. Presence of this field is the
+    // signal; sub-fields configure ephemeral-specific behaviour.
+    EphemeralSpec                                ephemeral                   = 22;
+    // Overrides the image's privileged setting. Unset uses the image default.
+    google.protobuf.BoolValue                    privileged                  = 23;
+    // Environment variables to set on the devbox container. Merged on top
+    // of any env vars defined by the image, keyed by name.
+    repeated BlueprintSpec.EnvVar                environment                 = 24;
+    // If unset, inherits DevboxDefaults.network_policy. Set to an empty
+    // NetworkPolicySpec{} to opt out of inheritance.
+    NetworkPolicySpec                            network_policy              = 25;
+    repeated PortSpec                            ports                       = 26;
+    // Labels attached to the devbox. Label names using Namespace-reserved
+    // prefixes are only accepted by trusted internal callers.
+    repeated namespace.stdlib.Label              labels                      = 27;
+    // Script to run once when the devbox is first initialized.
+    string                                       init_script                 = 28;
+    namespace.stdlib.HttpCallbackEndpoint        instance_event_callback     = 29; // Receives lifecycle events for every compute instance backing this devbox.
+    PersistenceMode                              persistence_mode            = 30;
+    repeated ServiceSpec                         services                    = 31;
+
+    bool                         activate              = 6;
+    ActivateRequest.Experimental activate_experimental = 7;
+
+    reserved 4;
+    reserved "startup_bytes";
+}
+
+message CreateFromTemplateRequest {
+    string                          name                  = 1;
+    string                          template_id           = 2;
+    bool                            activate              = 3;
+    ActivateRequest.Experimental    activate_experimental = 4;
+    string                          documented_purpose    = 5;
+    Overrides                       overrides             = 6;
+    repeated namespace.stdlib.Label labels                = 7;
+
+    message Overrides {
+        string     site               = 1;
+        AccessMode access_mode        = 2;
+    }
+}
+
+message CreateFromBlueprintRequest {
+    string                          name                  = 1;
+    string                          blueprint_id          = 2;
+    bool                            activate              = 3;
+    ActivateRequest.Experimental    activate_experimental = 4;
+    string                          documented_purpose    = 5;
+    Overrides                       overrides             = 6;
+    repeated namespace.stdlib.Label labels                = 7;
+
+    message Overrides {
+        string     site               = 1;
+        AccessMode access_mode        = 2;
+    }
+}
+
+message CreateFromDevboxRequest {
+    // Name for the new devbox.
+    string                                       name                       = 1;
+    // Name of the source devbox to fork from.
+    string                                       from_devbox                = 2;
+    // Optional: override the instance shape. If unset, inherits from the source devbox.
+    namespace.cloud.compute.v1beta.InstanceShape instance_shape             = 3;
+    // Optional: snapshot ID to boot from (as returned by ListPersistentVolumeSnapshots).
+    // If unset, the latest completed snapshot from the source devbox is used.
+    string                                       snapshot_id                = 4;
+    // Free-form description of what this devbox is for. Not inherited from the source devbox.
+    string                                       documented_purpose         = 6;
+    repeated namespace.stdlib.Label              labels                     = 7;
+
+    ActivateRequest.Experimental activate_experimental = 5;
+}
+
+message CreateResponse {
+    DevBox devbox      = 1;
+    string instance_id = 2;  // If activate is true.
+}
+
+message ActivateRequest {
+    string       name                    = 1;
+    Experimental experimental            = 2;
+    bool         include_ssh_credentials = 3;
+    bool         wait_for_readiness      = 4;
+    string       from_snapshot_id        = 5;  // If not set, uses the latest snapshot.
+    string       id                      = 6;  // If set, lookup by id instead of name.
+    string       id_or_name              = 7;  // If set, lookup by id first, then by name if not found.
+
+    message Experimental {
+        string          agent_imageref              = 2;
+        string          bake_imageref               = 3;
+        repeated string opaque_features             = 6;
+        bool            enable_dbus                 = 7;
+        DevinOutposts   devin_outposts              = 8;
+        CursorWorker    cursor_worker                = 9;
+        ClaudeAgent     claude_agent                 = 10;
+
+        reserved 1, 4, 5;
+
+        message DevinOutposts {
+            string connect_token     = 1;
+            string session_id        = 2;
+            string host              = 3;
+            string remote_binary_sha = 4;
+        }
+
+        message CursorWorker {
+            string access_token = 1;
+            string worker_id    = 2;
+            string pool_name    = 3;
+            string request_id   = 4;
+        }
+
+        message ClaudeAgent {}
+    }
+}
+
+message ActivateResponse {
+    string instance_id     = 1;
+    DevBox devbox          = 2;
+    bytes  private_ssh_key = 3;
+    InstanceMetadataSummary instance_metadata_summary = 4;
+
+    message InstanceMetadataSummary {
+        string ingress_domain = 1;
+    }
+}
+
+message ActivateResponseChunk {
+    ActivateResponse                                activation       = 1;
+    namespace.cloud.compute.v1beta.InstanceMetadata metadata         = 2;
+    string                                          container_status = 3;
+    Status                                          status           = 4;
+
+    enum Status {
+        STATUS_UNKNOWN             = 0;
+        STATUS_CREATING            = 1;
+        STATUS_WAITING_FOR_INSTANCE = 2;
+        STATUS_WAITING_FOR_DEVBOX  = 3;
+        STATUS_READY               = 4;
+    }
+}
+
+message ExpireRequest {
+    string name = 1;
+}
+
+message ExpireResponse {
+    repeated DevBox devboxes = 1;
+}
+
+message StopRequest {
+    string name = 1;
+}
+
+message StopResponse {
+    DevBox devbox      = 1;
+    string instance_id = 2;
+}
+
+message ListRequest {
+    enum OrderBy {
+        ORDER_BY_UNKNOWN = 0;
+        ORDER_BY_LAST_USED_AT = 1;
+        ORDER_BY_CREATED_AT = 2;
+    }
+
+    enum EphemeralFilter {
+        EPHEMERAL_FILTER_UNKNOWN            = 0;
+        EPHEMERAL_FILTER_ONLY_EPHEMERAL     = 1;
+        EPHEMERAL_FILTER_ONLY_NON_EPHEMERAL = 2;
+    }
+
+    message LabelFilter {
+        repeated namespace.stdlib.LabelFilterEntry any_of = 1;
+    }
+
+    // If a previous response returned a `pagination_cursor`, it can be
+    // specified to continue reading results with the same arguments as the
+    // original call.
+    bytes pagination_cursor = 1;
+
+    // Filter by the devbox creator.
+    namespace.stdlib.StringMatcher match_creator = 2;
+
+    // Filter by the resolved image name.
+    namespace.stdlib.StringMatcher match_image_name = 3;
+
+    // Filter by the image ref (e.g. repository@digest).
+    namespace.stdlib.StringMatcher match_image_ref = 4;
+
+    OrderBy order_by = 5;
+
+    // Filter by whether the devbox is ephemeral. If unset (UNKNOWN), both
+    // ephemeral and non-ephemeral devboxes are returned.
+    EphemeralFilter match_ephemeral = 6;
+
+    // The maximum number of entries to return. If 0 and `pagination_cursor`
+    // is unset, all matching devboxes are returned in a single response (the
+    // legacy behavior) and `pagination_cursor` in the response is never set.
+    // If > 0, the server returns at most `max_entries` and sets
+    // `pagination_cursor` in the response if more results exist.
+    int64 max_entries = 7;
+
+    // Only return devboxes that match every filter. A filter matches when any
+    // of its predicates match. NOT_EQUAL matches when the label is absent.
+    // Filters with no predicates are invalid.
+    repeated LabelFilter match_labels = 8;
+}
+
+message ListResponse {
+    // If set, there are additional results. Pass the same cursor to a
+    // subsequent List call (with the same filter arguments) to continue
+    // fetching results.
+    bytes pagination_cursor = 1;
+
+    // List of Devboxes that match the filter.
+    repeated DevBox devboxes = 2;
+}
+
+message GetUsageRequest {
+    // Optional: If no start date is provided, return usage starting from the
+    // first day of the current month. Period start is inclusive.
+    Date period_start = 1;
+
+    // Optional: Limits the time range of the returned results. Period end is
+    // inclusive and must be in the same month as period start.
+    Date period_end = 2;
+
+    message Date {
+        int32 year  = 1;
+        int32 month = 2;
+        int32 day   = 3;
+    }
+}
+
+message GetUsageResponse {
+    repeated DataPoint per_day = 1;
+
+    // Effective maximum number of non-expired devboxes for the tenant.
+    int32 maximum_count = 2;
+
+    // Effective maximum number of non-expired devboxes per user.
+    int32 maximum_count_per_user = 3;
+
+    message DataPoint {
+        int32 year  = 1;
+        int32 month = 2;
+        int32 day   = 3;
+
+        // Number of non-expired devboxes for the tenant at the end of the day,
+        // or the end of the requested period for the final partial day.
+        int32 active_count = 4;
+
+        // Number of non-expired devboxes created by the current user at the
+        // end of the day, or the end of the requested period for the final
+        // partial day.
+        int32 active_count_for_user = 5;
+    }
+}
+
+message FetchRequest {
+    string name                      = 1;
+    bool   include_ssh_credentials   = 2;
+    bool   return_activated_instance = 3;
+    string id                        = 4;  // If set, fetch by id instead of name.
+    string id_or_name                = 5;  // If set, fetch by id first, then by name if not found.
+}
+
+message FetchResponse {
+    DevBox devbox          = 1;
+    bytes  private_ssh_key = 2;
+    string instance_id     = 3;  // Set if `return_activated_instance` is true, and the devbox is currently running.
+}
+
+message ListSnapshotsRequest {
+    enum OrderBy {
+        ORDER_BY_UNKNOWN = 0;
+        ORDER_BY_CREATED_AT_DESC = 1;
+    }
+
+    string id_or_name = 1;
+    OrderBy order_by = 2;
+}
+
+message ListSnapshotsResponse {
+    repeated namespace.cloud.compute.v1beta.PersistentVolumeSnapshot snapshots = 1;
+}
+
+message AcquireLeaseRequest {
+    // AcquireLease calls with the same tag resolve to the same underlying Devbox if it exists.
+    // Allows callers to decide what configuration is classed as matching.
+    string tag = 1;
+
+    // Used to create a new devbox when no unleased devbox matches the tag.
+    CreateRequest create = 2;
+}
+
+message AcquireLeaseResponse {
+    DevBox devbox        = 1;
+    string instance_id   = 2; // Set if activated.
+    string lease_id      = 3; // Opaque handle for this lease. Pass to ReleaseLease.
+    LeaseOutcome outcome = 4;
+
+    enum LeaseOutcome {
+        LEASE_OUTCOME_UNSPECIFIED = 0;
+        LEASE_OUTCOME_CREATED = 1;
+        LEASE_OUTCOME_REUSED = 2;
+    }
+}
+
+message ReleaseLeaseRequest {
+    string id_or_name = 1; // Required if lease_id is not supplied. When both are set, guards that the lease belongs to the named devbox.
+    string lease_id   = 2; // Required if id_or_name is not supplied. Opaque handle returned by AcquireLease.
+}
+
+message ReleaseLeaseResponse {}
+
+// PoolLease captures the latest AcquireLease/ReleaseLease state of a Devbox, as
+// surfaced on the Devbox returned by List and Fetch. The tag identifies the
+// pool the devbox was leased from.
+message PoolLease {
+    // The tag identifies the pool this devbox was last leased from.
+    string tag = 1;
+
+    string lease_id = 2;
+
+    google.protobuf.Timestamp acquired_at = 3;
+
+    // If unset, this lease is still active (i.e. not yet released).
+    // Otherwise, the time at which ReleaseLease was called.
+    google.protobuf.Timestamp released_at = 4;
+}
+
+message DevBox {
+    string                                       id                        = 1;
+    string                                       name                      = 2;
+    google.protobuf.Timestamp                    created_at                = 3;
+    google.protobuf.Timestamp                    last_used_at              = 25;
+    google.protobuf.Timestamp                    destroyed_at              = 31;
+    string                                       image_ref                 = 4;
+    namespace.cloud.compute.v1beta.InstanceShape instance_shape            = 5;
+    string                                       site                      = 7;
+    string                                       creator                   = 8;  // E.g. user_...
+    string                                       volume_name               = 9;
+    int64                                        volume_size_gb            = 10;
+    int64                                        cache_volume_size_gb      = 11;
+    string                                       repository                = 12 [deprecated = true]; // Use version_control.repositories.
+    BlueprintRef                                 blueprint_ref             = 13;
+    string                                       workspace_dir             = 14;
+    string                                       default_dir               = 15;
+    BlueprintSpec                                spec                      = 16;
+    string                                       main_user                 = 17;
+    repeated BlueprintSpec.PortForward           port_forwards             = 18 [deprecated = true]; // Use AgentService.ListPorts.
+    repeated string                              private_features = 19;
+    repeated string                              enabled_features = 20;
+    ResolvedImage                                resolved_image   = 21;
+    google.protobuf.Duration                     busy_ensure_minimum_duration = 22;
+    AccessMode                                   access_mode                  = 23;
+    HttpAccessMode                               http_access_mode             = 32;
+    // Terminal sessions configured to persist with this devbox.
+    repeated BlueprintSpec.SessionSpec           permanent_sessions   = 24;
+    // Integrations configured for this devbox.
+    Integrations                                integrations         = 26;
+    // Free-form description of what this devbox is for. Set at creation time.
+    string                                      documented_purpose   = 27;
+    EphemeralSpec                               ephemeral            = 28;
+    // If set, describes the most recent lease of this devbox. Absent when
+    // the devbox has never been leased.
+    PoolLease                                   pool_lease           = 29;
+    NetworkPolicySpec                           network_policy       = 30;
+    repeated namespace.stdlib.Label             labels               = 33;
+    VersionControlSpec                          version_control      = 34;
+
+    reserved 6;
+    reserved "startup_bytes";
+
+    message ResolvedImage {
+        string id      = 1;
+        string name    = 2;
+        int64  version = 3;
+    }
+}
+
+message BlueprintRef {
+    string blueprint_name = 1;
+    string blueprint_id   = 2;
+}
+
+message ImageSource {
+    string dockerfile = 1;
+    // Build that produced this image. Empty when wired from an existing image.
+    string build_ref = 2;
+}
+
+message WireImageRequest {
+    string        image_ref   = 1;
+    string        description = 2;
+    BlueprintSpec metadata    = 3;
+    string        name        = 4;
+    ImageSource   source      = 5;
+}
+
+message EphemeralSpec {
+    // How long a stopped instance is retained before it is eligible for expiry.
+    // Overrides the devbox app policy default:
+    //
+    //   unset   inherit the app policy default
+    //   < 0     never expire (cleanup disabled)
+    //   = 0     expire as soon as it is stopped
+    //   > 0     expire after being stopped for at least this long
+    //
+    // Expiry is not immediate once the duration has elapsed.
+    google.protobuf.Duration stopped_retention_duration = 1;
+}
+
+message DevboxTemplateSpec {
+    string                        name                         = 1;  // Immutable; 1-63 letters, digits or hyphens; must not start or end with a hyphen.
+    InstanceSpec                  instance                     = 2;
+    google.protobuf.StringValue   site                         = 3;
+    EphemeralSpec                 ephemeral                    = 4;
+    VersionControlSpec            version_control              = 5;
+    repeated BlueprintSpec.EnvVar environment                  = 6;
+    google.protobuf.Duration      busy_ensure_minimum_duration = 7;
+    Integrations                  integrations                 = 8;
+    NetworkPolicySpec             network_policy               = 9;
+    int64                         volume_size_gb               = 10;
+    Experimental                  experimental                 = 11;
+    string                        description                  = 12;  // Optional human-readable description.
+    AccessMode                    access_mode                  = 13;
+    Features                      features                     = 14;
+    repeated PortSpec             ports                        = 15;
+    Type                          type                         = 16;
+    repeated BlueprintSpec.SessionSpec sessions                = 17;
+    // Script to run once when a devbox created from this template is first initialized.
+    string                        init_script                   = 18;
+    PersistenceMode               persistence_mode              = 19;
+    repeated ServiceSpec          services                      = 20;
+    // Overrides the image's privileged setting. Unset uses the image default.
+    google.protobuf.BoolValue     privileged                    = 21;
+
+    enum Type {
+        TYPE_UNSPECIFIED       = 0;
+        TYPE_GENERAL           = 1;
+        TYPE_MANAGED_BY_CLAUDE = 4;
+        TYPE_MANAGED_BY_CURSOR = 2;
+        TYPE_MANAGED_BY_DEVIN  = 3;
+    }
+
+    message InstanceSpec {
+        namespace.cloud.compute.v1beta.InstanceShape shape = 1;
+        LinuxInstanceSpec                            linux = 2;
+
+        message LinuxInstanceSpec {
+            string image_ref = 1;
+            string image_name = 2;
+        }
+    }
+
+    message Experimental {
+        DevinOutpostSpec      devin_outpost      = 1;
+        CursorWorkerSpec      cursor_worker      = 2;
+        ClaudeEnvironmentSpec claude_environment = 3;
+
+        message DevinOutpostSpec {
+            string endpoint = 1;
+            string outpost_id = 2;
+        }
+
+        message CursorWorkerSpec {
+            string pool_name = 1;
+        }
+
+        message ClaudeEnvironmentSpec {
+            string environment_id = 1;
+            string webhook_id     = 2;
+        }
+    }
+}
+
+message DevboxTemplate {
+    string                    id         = 1;
+    int64                     version    = 2;
+    google.protobuf.Timestamp created_at = 3;
+    google.protobuf.Timestamp updated_at = 4;
+
+    DevboxTemplateSpec spec = 5;
+}
+
+message CreateTemplateRequest {
+    DevboxTemplateSpec spec         = 1;
+    Experimental       experimental = 2;
+
+    // Transient integration setup values that must not be persisted in DevboxTemplateSpec.
+    // Credentials are stored as tenant Vault secrets and never returned.
+    message Experimental {
+        string devin_connect_code            = 1;
+        string devin_connect_state           = 2;
+        string cursor_api_key                = 3;
+        string claude_api_key                = 4;
+        string claude_environment_key        = 5;
+        string claude_webhook_signing_key    = 6;
+    }
+}
+
+message CreateTemplateResponse {
+    DevboxTemplate template = 1;
+}
+
+message UpdateTemplateRequest {
+    string             id           = 1;
+    DevboxTemplateSpec spec         = 2;
+    Experimental       experimental = 3;
+
+    // Transient integration setup values that must not be persisted in DevboxTemplateSpec.
+    // Credentials are stored as tenant Vault secrets and never returned.
+    message Experimental {
+        string devin_connect_code            = 1;
+        string devin_connect_state           = 2;
+        string cursor_api_key                = 3;
+        string claude_api_key                = 4;
+        string claude_environment_key        = 5;
+        string claude_webhook_signing_key    = 6;
+    }
+}
+
+message UpdateTemplateResponse {
+    DevboxTemplate template = 1;
+}
+
+message FetchTemplateRequest {
+    string name = 1;
+}
+
+message FetchTemplateResponse {
+    DevboxTemplate template = 1;
+}
+
+message ListTemplatesRequest {
+    enum OrderBy {
+        ORDER_BY_UNKNOWN = 0;
+        ORDER_BY_CREATED_AT = 1;
+        ORDER_BY_UPDATED_AT = 2;
+    }
+
+    // Cursor from a previous response, to continue reading results.
+    bytes pagination_cursor = 1;
+
+    OrderBy order_by = 2;
+
+    // Maximum entries to return. Defaults to 100 if unset (0).
+    int64 max_entries = 3;
+}
+
+message ListTemplatesResponse {
+    repeated DevboxTemplate templates = 1;
+
+    // Set when more results exist; pass it back to fetch the next page.
+    bytes pagination_cursor = 2;
+}
+
+message ExpireTemplateRequest {
+    string id = 1;
+}
+
+message ExpireTemplateResponse {}
+
+message DevboxBlueprint {
+    string                    id         = 1;
+    int64                     version    = 2;
+    google.protobuf.Timestamp created_at = 3;
+    google.protobuf.Timestamp updated_at = 4;
+
+    DevboxTemplateSpec spec = 5;
+}
+
+message CreateBlueprintRequest {
+    DevboxTemplateSpec spec         = 1;
+    Experimental       experimental = 2;
+
+    // Transient integration setup values; credentials are never returned.
+    message Experimental {
+        string devin_connect_code         = 1;
+        string devin_connect_state        = 2;
+        string cursor_api_key             = 3;
+        string claude_api_key             = 4;
+        string claude_environment_key     = 5;
+        string claude_webhook_signing_key = 6;
+    }
+}
+
+message CreateBlueprintResponse {
+    DevboxBlueprint blueprint = 1;
+}
+
+message EnsureBlueprintRequest {
+    // Only spec.name is used when the blueprint already exists.
+    DevboxTemplateSpec                  spec         = 1;
+    CreateBlueprintRequest.Experimental experimental = 2;
+}
+
+message EnsureBlueprintResponse {
+    DevboxBlueprint blueprint = 1;
+}
+
+message UpdateBlueprintRequest {
+    string                              id           = 1;
+    DevboxTemplateSpec                  spec         = 2;
+    CreateBlueprintRequest.Experimental experimental = 3;
+}
+
+message UpdateBlueprintResponse {
+    DevboxBlueprint blueprint = 1;
+}
+
+message FetchBlueprintRequest {
+    string name = 1;
+}
+
+message FetchBlueprintResponse {
+    DevboxBlueprint blueprint = 1;
+}
+
+message ListBlueprintsRequest {
+    enum OrderBy {
+        ORDER_BY_UNKNOWN = 0;
+        ORDER_BY_CREATED_AT = 1;
+        ORDER_BY_UPDATED_AT = 2;
+    }
+
+    // Cursor from a previous response, to continue reading results.
+    bytes pagination_cursor = 1;
+
+    OrderBy order_by = 2;
+
+    // Maximum entries to return. Defaults to 100 if unset (0).
+    int64 max_entries = 3;
+}
+
+message ListBlueprintsResponse {
+    repeated DevboxBlueprint blueprints = 1;
+
+    // Set when more results exist; pass it back to fetch the next page.
+    bytes pagination_cursor = 2;
+}
+
+message ExpireBlueprintRequest {
+    string id = 1;
+}
+
+message ExpireBlueprintResponse {}
+
+message BeginDevinOutpostConnectRequest {
+    string outpost_name = 1;  // Suggested outpost name shown on the Devin connect page (admin can edit).
+    string platform     = 2;  // Allowed: "linux", "macos", or "windows".
+}
+
+message BeginDevinOutpostConnectResponse {
+    string connect_url = 1;
+    string state       = 2;
+}
+
+message VersionControlAuthor {
+    string name  = 1;
+    string email = 2;
+}
+
+message VersionControlSpec {
+    string         git_repository  = 1;
+    string         ref             = 2; // Branch, tag, or commit SHA to check out. When empty, the repository's default branch is used.
+    CheckoutMethod checkout_method = 3;
+
+    // WIP: multi-repo support that will deprecate fields above. Not yet ready!
+    repeated GitRepositorySpec repositories = 4;
+
+    message GitRepositorySpec {
+        string                            repository      = 1;
+        string                            ref             = 2; // Branch, tag, or commit SHA to check out. When empty, the repository's default branch is used.
+        VersionControlSpec.CheckoutMethod checkout_method = 3;
+    }
+
+    enum CheckoutMethod {
+        CHECKOUT_METHOD_UNSPECIFIED         = 0;
+        CHECKOUT_METHOD_GIT_CLONE           = 1;
+        CHECKOUT_METHOD_GIT_SNAPSHOT_UNPACK = 2;
+    }
+}
+
+message BlueprintSpec {
+    string               remote_user     = 1;
+    string               shell           = 13;
+    repeated PortForward port_forwards   = 2;
+    bool                 privileged      = 3;
+    repeated string      cap_add         = 4;
+    repeated string      security_opt    = 5;
+    repeated EnvVar      environment     = 6;
+    repeated Op          on_create       = 7;
+    repeated Op          on_startup      = 8;
+    repeated string      include_in_path = 14;
+    repeated Volume      volumes         = 15;
+    bool                 whole_system_persistency = 16;
+
+    string cache_volume_tag     = 9;
+    int64  cache_volume_size_gb = 10;
+
+    UserOrUid docker_sock_user    = 11;
+    bool      setup_docker_client = 12;
+
+    string workspace_dir = 17;
+    // Terminal sessions to create at startup.
+    repeated SessionSpec sessions = 18;
+
+    message PortForward {
+        int32  port  = 1;
+        string label = 2;
+    }
+
+    message EnvVar {
+        string name           = 1;
+        string value          = 2;
+        string from_secret_id = 3;
+    }
+
+    message Op {
+        RunCommand run_command = 1;
+        RunScript  run_script  = 2;
+
+        message RunCommand {
+            string          command = 1;
+            repeated string args    = 2;
+        }
+
+        message RunScript {
+            string script = 1;
+        }
+    }
+
+    message UserOrUid {
+        int32  uid  = 1;
+        string user = 2;
+    }
+
+    message Volume {
+        string mount_path  = 1;
+        string volume_name = 2;
+    }
+
+    message SessionSpec {
+        string name    = 1;
+        string emoji   = 2;
+        string command = 3;
+    }
+}
+
+message WireImageResponse {
+    Image image = 1;
+}
+
+message ExpireImageRequest {
+    string repository = 1;
+    string digest     = 2;
+    string name       = 3;
+    int64  version    = 4;
+}
+
+message ExpireImageResponse {}
+
+message ListImagesRequest {
+    bool include_builtin = 2;
+
+    bytes pagionation_cursor = 1;
+}
+
+message ListImagesResponse {
+    bytes          pagination_cursor = 1;
+    repeated Image image             = 2;
+}
+
+message Image {
+    string                    repository      = 1;
+    string                    digest          = 2;
+    string                    original_digest = 3;
+    google.protobuf.Timestamp created_at      = 4;
+    string                    description     = 5;
+    BlueprintSpec             metadata        = 6;
+    repeated Flag flag = 7;
+    int64                     version         = 8;
+    ImageSource               source          = 9;
+    string                    name            = 10;
+    string                    id              = 11;
+    google.protobuf.Timestamp expires_at      = 12;
+
+    enum Flag {
+        FLAG_UNKNOWN      = 0;
+        NAMESPACE_MANAGED = 1;
+        FLAG_DEPRECATED   = 2; // Existing references remain valid; omit from new selections.
+    }
+}
+
+message OptimizeImageRequest {
+    string repository = 1;
+    string digest     = 2;
+    string site       = 3;
+}
+
+message OptimizeImageResponseChunk {
+    Status status            = 1;
+    string baker_instance_id = 2;
+    string failure_message   = 3;
+
+    enum Status {
+        STATUS_UNKNOWN = 0;
+        PREPARING      = 1;
+        STARTING       = 2;
+        BAKING         = 3;
+        DONE           = 4;
+        FAILED         = 5;
+    }
+}
+
+message InspectImageRequest {
+    string image_ref = 1;
+}
+
+message InspectImageResponse {
+    repeated string              optimized_kinds    = 1;
+    string                       user               = 2;
+    map<string, string>          env                = 3;
+    int64                        version            = 4;
+    BlueprintSpec                spec               = 5;
+    google.protobuf.Timestamp    version_created_at = 6;
+    // Sites for which this image has been optimized.
+    repeated string              optimized_sites    = 7;
+}
+
+message DescribeImageRequest {
+    string digest  = 1;
+    int64  version = 2;
+    string name    = 3;
+    string id      = 4;
+}
+
+message DescribeImageResponse {
+    Image image = 1;
+}
+
+message ListComposableFeaturesRequest {}
+
+message ListComposableFeaturesResponse {
+    repeated ComposableFeature features = 1;
+}
+
+message ComposableFeature {
+    string id          = 1;
+    string icon_url    = 2;
+    string description = 3;
+    bool   builtin     = 4;
+}
+
+message RegisterComposableFeatureRequest {
+    ComposableFeature feature = 1;
+    FeatureSpec       spec    = 2;
+}
+
+message RegisterComposableFeatureResponse {}
+
+message RemoveComposableFeatureRequest {
+    string id = 1;
+}
+
+message RemoveComposableFeatureResponse {}
+
+message MetadataRequest {}
+
+message MetadataResponse {
+    repeated Site sites = 1;
+
+    message Site {
+        string          site      = 1;
+        string          label     = 2;
+        repeated string platforms = 3;  // Canonical OS/architecture values, such as "linux/amd64" or "macos/arm64".
+    }
+}
+
+// FeatureSpec represents the changes to apply when a feature is enabled.
+message FeatureSpec {
+    // Scripts to run during devbox creation.
+    repeated RunScript on_create = 1;
+    // Terminal sessions to create.
+    repeated SessionSpec sessions = 2;
+    // Paths to add to PATH.
+    repeated string include_in_path = 3;
+    // Named ports to export from the devbox container.
+    repeated ExportedPort exported_ports = 4;
+    // Scripts to run on every devbox startup (not just first boot).
+    repeated RunScript on_startup = 5;
+
+    message RunScript {
+        string name   = 1;
+        string script = 2;
+        // If set, downloads the script from this URL and runs it with the interpreter.
+        // This replaces patterns like "curl -fsSL https://example.com/install.sh | bash".
+        string script_source = 3;
+        // The interpreter to use when running the script (e.g., "bash", "sh", "python3").
+        // If not set, defaults to "/bin/sh" on Unix or Windows PowerShell with -File on Windows.
+        string interpreter = 4;
+    }
+
+    message SessionSpec {
+        string name    = 1;
+        string emoji   = 2;
+        string command = 3;
+    }
+
+    message ExportedPort {
+        string name = 1;
+        int32 port = 2;
+    }
+}
+
+message UpdateRequest {
+    string                                       name                        = 1;
+    namespace.cloud.compute.v1beta.InstanceShape instance_shape              = 2;
+    google.protobuf.Duration                     busy_ensure_minimum_duration = 3;
+    // If set, updates the persisted integrations config for this devbox.
+    Integrations                                 integrations                = 4;
+    // If > 0, requests resizing the persistent volume to this size. Must be
+    // greater than or equal to the current size and not exceed the tenant
+    // policy's maximum volume size. Cannot shrink. Applies on next devbox
+    // restart.
+    int64                                        volume_size_gb              = 5;
+    // If set, updates the persisted privileged flag. Applies on next restart.
+    google.protobuf.BoolValue                    privileged                  = 6;
+    // If set, updates the persisted network policy. Applies on next restart.
+    // An empty NetworkPolicySpec{} clears the stored policy.
+    NetworkPolicySpec                            network_policy              = 7;
+    // If set, updates access to this devbox through devbox.so URLs.
+    HttpAccessMode                               http_access_mode            = 8;
+}
+
+message UpdateResponse {
+    DevBox devbox = 1;
+}
+
+message DevboxDefaults {
+    namespace.cloud.compute.v1beta.InstanceShape instance_shape              = 1;
+    string                                       image_name                  = 2;
+    VersionControlSpec                           version_control             = 3;
+    google.protobuf.Duration                     busy_ensure_minimum_duration = 4;
+    AccessMode                                   access_mode                 = 5;
+    Integrations                                 integrations                = 6;
+    repeated string                              enabled_features            = 7;
+    // Default persistent volume size in GB applied to new devboxes when the
+    // create request doesn't specify a size. Capped at the tenant policy's
+    // maximum_volume_size_gb. 0 means use the system default.
+    int64                                        volume_size_gb              = 8;
+    NetworkPolicySpec                            network_policy              = 9;
+}
+
+message UpdateDefaultsRequest {
+    DevboxDefaults defaults            = 1;
+    int64          match_metadata_version = 2;
+}
+
+message UpdateDefaultsResponse {
+    DevboxDefaults defaults = 1;
+}
+
+message FetchDefaultsRequest {}
+
+message FetchDefaultsResponse {
+    DevboxDefaults defaults          = 1;
+    int64          metadata_version  = 2;
+    // Values explicitly set via tenant policy.
+    DevboxDefaults by_policy         = 3;
+}
+
+message CreateRepositoryRequest {
+    string repository = 1;
+}
+
+message CreateRepositoryResponse {}
+
+message Features {
+    repeated string enabled = 1;
+}
+
+message NetworkPolicySpec {
+    // If set, restrict outbound network access to the listed domains.
+    // Namespace infrastructure domains are always included.
+    EgressDomains egress_domains = 1;
+
+    // If set, apply the reusable workspace egress policy identified by tag.
+    // Mutually exclusive with egress_domains.
+    EgressPolicy egress_policy = 2;
+
+    message EgressDomains {
+        // Prefix a domain with "*." to include all of its subdomains.
+        repeated string allowed = 1;
+
+        // If true, log egress decisions but don't block.
+        bool advisory = 2;
+    }
+
+    message EgressPolicy {
+        string tag = 1;
+    }
+}
+
+message Integrations {
+    TailscaleIntegration tailscale      = 1;
+    ClaudeIntegration    claude         = 2;
+
+    message TailscaleIntegration {
+        // Name of a tenant-level Tailscale integration spec (defined in tenant policy
+        // under integrations.tailscale). Use `nsc integrations tailscale list` to see
+        // available specs. The oauth_client_id and tags are resolved from the policy spec.
+        string from_spec = 1;
+    }
+
+    message ClaudeIntegration {
+        string integration_id    = 1;
+        string claude_session_id = 2;
+    }
+}
+
+message CreateIntegrationRequest {
+    ClaudeIntegrationSpec claude = 1;
+}
+
+message CreateIntegrationResponse {
+    string id = 1;
+}
+
+message ListIntegrationsRequest {}
+
+message ListIntegrationsResponse {
+    repeated Integration integrations = 1;
+}
+
+message DeleteIntegrationRequest {
+    string id = 1;
+}
+
+message DeleteIntegrationResponse {}
+
+// Stored view of an integration. Exactly one spec field is populated.
+message Integration {
+    string                    id         = 1;
+    google.protobuf.Timestamp created_at = 2;
+    google.protobuf.Timestamp updated_at = 3;
+
+    ClaudeIntegrationSpec claude = 4;
+}
+
+// Depending on the situation, fields may not be returned.
+message ClaudeIntegrationSpec {
+    string claude_api_key             = 1;
+    string claude_environment_id      = 2;
+    string claude_environment_key     = 3;
+    string claude_webhook_signing_key = 4;
+    string nsc_webhook_id             = 5; // unique id in the webhook endpoint to identifier the caller
+}

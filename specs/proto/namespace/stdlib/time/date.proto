@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package namespace.stdlib.time;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/stdlib/time";
+
+message Date {
+    int32 year  = 1;  // 2023
+    int32 month = 2;  // 1-12
+    int32 day   = 3;  // 1-31
+}

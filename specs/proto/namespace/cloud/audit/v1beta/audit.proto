@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package namespace.cloud.audit.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/audit/v1beta";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/stdlib/matchers.proto";
+
+// AuditService provides access to user-initiated events in a workspace's audit log.
+//
+// ## Access
+//
+// This service is available at the global endpoint:
+// ```
+// https://global.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls require a tenant token passed as a Bearer token.
+// The token must grant the {"audit/entry", "list"} permission.
+service AuditService {
+    // Lists audit entries matching the specified filters, newest first.
+    rpc ListEntries(ListEntriesRequest) returns (ListEntriesResponse);
+
+    // Streams a finite, resumable snapshot of matching audit entries, newest first.
+    rpc StreamListEntries(StreamListEntriesRequest) returns (stream StreamListEntriesResponse);
+}
+
+message EntryFilter {
+    // Filters entries by occurrence time. `after` is inclusive and `before` is exclusive.
+    namespace.stdlib.TimestampRange time_range = 1;
+
+    // Filters by public action name.
+    namespace.stdlib.StringMatcher action = 2;
+
+    // Filters user actors by their Namespace user ID.
+    namespace.stdlib.StringMatcher actor_user_id = 3;
+}
+
+message ListEntriesRequest {
+    // Continues a previous request. When set, filter must be unset.
+    bytes pagination_cursor = 1;
+
+    // Maximum number of entries to return. Defaults to 100 and may not exceed 1000.
+    int32 max_entries = 2;
+
+    EntryFilter filter = 3;
+}
+
+message ListEntriesResponse {
+    repeated AuditEntry entries = 1;
+
+    // If set, there are additional entries. Pass this cursor to the next request.
+    bytes pagination_cursor = 2;
+
+    AuditAccess access = 3;
+}
+
+message StreamListEntriesRequest {
+    // Filters a new stream. Must be unset when resume_cursor is set.
+    EntryFilter filter = 1;
+
+    // Restarts an interrupted stream after the last received response.
+    bytes resume_cursor = 2;
+}
+
+message StreamListEntriesResponse {
+    repeated AuditEntry entries = 1;
+
+    // Restarts the stream after all entries in this response.
+    bytes resume_cursor = 2;
+
+    // Included in the first response, including when there are no matching entries.
+    AuditAccess access = 3;
+}
+
+message AuditAccess {
+    int32 retention_days = 1;
+
+    // The effective inclusive lower bound applied to the request.
+    google.protobuf.Timestamp effective_after = 2;
+}
+
+message AuditEntry {
+    string event_id = 1;
+    string tenant_id = 2;
+    google.protobuf.Timestamp occurred_at = 3;
+
+    // A stable public action name such as "instance.destroy".
+    string action = 4;
+
+    AuditActor actor = 5;
+    repeated AuditTarget targets = 6;
+
+    // Action-specific, allowlisted attributes.
+    google.protobuf.Struct attributes = 7;
+}
+
+message AuditActor {
+    // Always "user". Retained to identify the actor kind as the API evolves.
+    string type = 1;
+
+    string user_id = 2;
+    string email = 3;
+    string github_username = 4;
+    string provider = 5;
+}
+
+message AuditTarget {
+    string type = 1;
+
+    string instance_id = 2;
+    string user_id = 3;
+    string email = 4;
+    string github_username = 5;
+    string github_profile_id = 6;
+    string github_installation_id = 7;
+    string network_segment_tag = 8;
+    string secret_id = 9;
+    string image_ref = 10;
+    string devbox_id = 11;
+    string egress_policy_tag = 12;
+}

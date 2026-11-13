@@ -1,0 +1,570 @@
+syntax = "proto3";
+
+package namespace.cloud.iam.v1beta;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/stdlib/labels.proto";
+import "proto/namespace/cloud/iam/v1beta/authz.proto";
+import "proto/namespace/cloud/iam/v1beta/tokens.proto";
+
+// TenantService allows the creation, and management of "tenants" in Namespace's
+// platform. Tenants can own resources, but sharing of resources across tenants
+// is not allowed by the platform, which provides strong isolation guarantees.
+// Tenants can be used to represent "workspaces", "projects" or merely "users".
+// The platform does not prescribe how tenants are to be used.
+//
+// See https://namespace.so/docs/workspaces for an overview.
+//
+// ## Access
+//
+// IAM services are available over gRPC and HTTP on the following endpoint:
+//
+// ```
+// https://iam.namespaceapis.com:443
+// ```
+//
+// See [the overview](https://buf.build/namespace/cloud) for examples accessing
+// the API from the console.
+//
+// ## SDKs and Examples
+//
+// **Go SDK**: [namespacelabs.dev/integrations](https://github.com/namespacelabs/integrations) —
+// provides ready-to-use gRPC clients and authentication helpers.
+//
+// **TypeScript SDK**: [@namespacelabs/sdk](https://github.com/namespacelabs/typescript-sdk) —
+// provides typed clients, authentication, and token management for Node.js.
+//
+// **Examples** (Go, TypeScript):
+// [ensuretenant](https://github.com/namespacelabs/examples/tree/master/go/ensuretenant),
+// [createpartnerinstance](https://github.com/namespacelabs/examples/tree/master/go/createpartnerinstance),
+// [iam-demo](https://github.com/namespacelabs/examples/tree/master/typescript/iam-demo).
+//
+// ## Authentication
+//
+// Calls to the Tenant service require providing a JWT as a Bearer token, that
+// has been signed by an authority that the Namespace platform trusts.
+//
+// Such trust relationships are maintained manually today. Reach out to
+// `support@namespace.so` if you'd like to use these capabilities
+// programatically.
+//
+// Namespace relies on public-key cryptography and
+// [OpenID Connect standard](https://openid.net/developers/specs/) to
+// verify the tokens. This way we avoid using pre-shared keys
+// which are more easily compromised.
+//
+// ### AWS Workload Federation Using AWS Cognito
+//
+// Applications running on AWS can rely on AWS IAM to identify themselves
+// to Namespace.
+//
+// #### Setting Up:
+//
+// 1. Create a AWS Cognito Identity Pool
+//    * Go to AWS' management console, and select "Cognito" in your region of choice.
+//    * Select `Create identity pool`
+//    * Within the dialog, select `Authenticated Access` and `Custom developer provider`.
+//    * Select an existing IAM Role to use with Cognito, or create a new one. Note:
+//      This is not necessary to establish a trust relationship with Namespace, as
+//      Namespace never issues AWS requests.
+//    * Enter `namespace.so` as "Developer provider name".
+//    * Give the new identity pool a name: you can pick any name.
+//    * And finally, head over to the final screen and press `Create identity pool`.
+//    * Make note of the Identity pool ID. It's of the format
+//     `{region}:{guid}`. E.g. `eu-central-1:b35d4239-99ea-48be-a5e6-68afbcefd649`.
+// 2. Establishing a trust relationship in Namespace
+//    * To make Namespace platform trust tokens issued by the identity pool created above
+//      reach out to Namespace team at support@namespace.so providing the identity pool ID.
+//    * You will receive your Namespace Partner ID. Note: Partner ID is a public identifier,
+//      not a security token.
+//
+// #### Using AWS Cognito Tokens
+//
+// A workload running on AWS can obtain a JWT token from the identity pool created above
+// using [`GetOpenIdTokenForDeveloperIdentity` API](https://docs.aws.amazon.com/cognitoidentity/latest/APIReference/API_GetOpenIdTokenForDeveloperIdentity.html).
+//
+// Provide the following parameters:
+// * `IdentityPoolId=${identity pool ID created above}`
+// * `Logins={"namespace.so": "Namespace partner ID created above"}`
+//
+// You can also use AWS CLI:
+// ```sh
+// aws cognito-identity get-open-id-token-for-developer-identity \
+//     --identity-pool-id {identity pool ID} \
+//     --logins namespace.so={partner ID}
+// ```
+//
+// The token can be used as to authenticate calls to Tenants API with Authorization header:
+//
+// ```
+// Authorization: Bearer cognito_{token}
+// ```
+//
+// ### OpenID Connect
+//
+// Namespace can use OpenID Connect tokens issued by a trusted provider to
+// identify a partner.
+//
+// #### Setting Up
+//
+// 1. Set up OpenID Connect Provider that can sign ID Tokens and supports
+//    [OpenID Connect Discovery protocol](https://openid.net/specs/openid-connect-discovery-1_0.html).
+// 2. Provide Namespace with its URL. Namespace will issue a Namespace Partner ID.
+// 3. When authenticating with Namespace, it will query `https://{yourIssuerDomain}/.well-known/openid-configuration` to fetch the public key for the issuer.
+//
+// Alternative: if your OIDC provider is not fully set up yet, Namespace can pin static credentials for you.
+// 1. Generate a signing key using ES256.
+//
+//    ```bash
+//    $ openssl ecparam -genkey -name prime256v1 -noout -out private_key.pem
+//    $ openssl ec -in private_key.pem -pubout -out public_key.pem
+//    ```
+//
+// 2. Provide an issuer URL and the public signing key (PEM format).
+// 3. Namespace will provide you with a [`kid`](https://openid.net/specs/openid-connect-core-1_0.html#Signing) allowing for early partner access.
+//
+// #### Using ID Tokens:
+//
+// Sign an ID Token with the following claims:
+//   * `iss={OpenID provider issuer}`
+//   * `sub={Partner ID}`
+//   * `aud="namespace.so"`
+//
+// The token can be used as to authenticate calls to Tenants API with Authorization header:
+//
+// ```
+// Authorization: Bearer oidc_{token}
+// ```
+service TenantService {
+    // Creates a new Tenant. After a tenant creation call returns, the Tenant
+    // can be used immediately. Tenants can be cordoned temporarily (via
+    // `SuspendTenant`) or removed permanently (via `RemoveTenant`).
+    //
+    // ### Errors
+    // - If one of the properties that are passed in is invalid, an
+    //   `InvalidArgument` error is returned.
+    // - If a tenant with the specified `external_account_id` already exists
+    //   `FailedPrecondition` error is returned.
+    rpc CreateTenant(CreateTenantRequest) returns (TenantResponse);
+
+    // Updates policies attached to a Tenant.
+    //
+    // ### Errors
+    // - If one of the properties that are passed in is invalid, an
+    //   `InvalidArgument` error is returned.
+    rpc UpdateTenant(UpdateTenantRequest) returns (TenantResponse);
+
+    // Retrieves the policies that apply to the tenant.
+    //
+    // Requires either a partner token, or an admin-scoped tenant token.
+    //
+    // ### Errors
+    // - If the tenant referenced does not exist, a `NotFound` status is
+    //   returned.
+    rpc DescribePolicies(DescribePoliciesRequest) returns (DescribePoliciesResponse);
+
+    // Updates policies attached to a Tenant.
+    //
+    // Requires either a partner token, or an admin-scoped tenant token.
+    //
+    // ### Errors
+    // - If one of the properties that are passed in is invalid, an
+    //   `InvalidArgument` error is returned.
+    rpc UpdatePolicies(UpdatePoliciesRequest) returns (google.protobuf.Empty);
+
+    // Creates or updates a tenant associated with an external account.
+    //
+    // Namespace allows to associate a unique tenant to an opaque external
+    // account ID. If a tenant with the given external ID already exists
+    // its properties are updated and the existing tenant is returned.
+    // Otherwise a new tenant is created with the associated external ID.
+    //
+    // Tenants created by CreateTenant never have an associated external ID.
+    // External account ID cannot be modified after creation.
+    //
+    // ### Errors
+    // - If one of the properties that are passed in is invalid, an
+    //   `InvalidArgument` error is returned.
+    rpc EnsureTenantForExternalAccount(EnsureTenantForExternalAccountRequest) returns (TenantResponse);
+
+    // Instructs the platform to remove a Tenant. Removing a Tenant is
+    // unreversible. It both prevents new tenant credentials to be generated,
+    // but will also propagate to Compute and other infrastructure to remove or
+    // cordon resources owned by the Tenant. It is not guaranteed that resources
+    // owned by a Tenant are removed immediately; they may be subject to garbage
+    // collection policies deployed within the platform.
+    //
+    // To request the immediate removal of Tenant resources, contact
+    // `support@namespace.so`.
+    //
+    // ### Errors
+    // - If the tenant referenced does not exist, a `NotFound` status is
+    //   returned.
+    rpc RemoveTenant(TenantReference) returns (google.protobuf.Empty);
+
+    // Lists all tenants that match the criteria specified.
+    rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
+
+    // Produces credentials in the form of a Bearer token that grant access to
+    // the specified Tenant. The credentials provided to the `IssueTenantToken`
+    // call are validated to verify they are capable of requesting credentials.
+    rpc IssueTenantToken(IssueTenantTokenRequest) returns (IssueTenantTokenResponse);
+
+    // Produces credentials in the form of a X.509 client certificate that grant
+    // access to the specified Tenant. The credentials provided to the
+    // `IssueTenantClientCertificate` call are validated to verify they are
+    // capable of requesting credentials.
+    rpc IssueTenantClientCertificate(IssueTenantClientCertificateRequest) returns (IssueTenantClientCertificateResponse);
+
+    // Exchanges tenant Bearer credentials for an X.509 client certificate with
+    // the same tenant identity and no broader permissions.
+    rpc ExchangeTenantTokenForClientCert(ExchangeTenantTokenForClientCertRequest) returns (ExchangeTenantTokenForClientCertResponse);
+
+    // Suspending a Tenant prevents it from creating new resources, but does not
+    // immediately terminate resources it owns that may be running. Suspending a
+    // tenant is a useful operational utility that can be used to cordon a
+    // particular user, without requiring removing resources that that user
+    // owns.
+    //
+    // ### Errors
+    // - If the tenant referenced does not exist, a `NotFound` status is
+    //   returned.
+    rpc SuspendTenant(TenantReference) returns (google.protobuf.Empty);
+
+    // Un-suspends a previously suspended Tenant. If the Tenant was not
+    // suspended, it is a no-op.
+    //
+    // ### Errors
+    // - If the tenant referenced does not exist, a `NotFound` status is
+    //   returned.
+    rpc ResumeTenant(TenantReference) returns (google.protobuf.Empty);
+
+    // Creates or updates a Tenant Group.
+    //
+    // Tenant Groups are identified by name and scoped by the Namespace Partner Account.
+    //
+    // ### Errors
+    // - If one of the properties that are passed in is invalid, an
+    //   `InvalidArgument` error is returned.
+    rpc EnsureTenantGroup(EnsureTenantGroupRequest) returns (TenantGroupResponse);
+
+    // Lists all Tenant Groups owned by the Namespace Partner Account.
+    rpc ListTenantGroups(ListTenantGroupsRequest) returns (ListTenantGroupsResponse);
+
+    // Lists all Tenant Groups owned by the Namespace Partner Account.
+    rpc DescribeTenantGroup(TenantGroupReference) returns (DescribeTenantGroupResponse);
+
+    // Deletes a Tenant Group owned by the Namespace Partner Account.
+    //
+    // ### Errors
+    // - If the tenant group referenced does not exist, a `NotFound` status is
+    //   returned.
+    // - If any active tenants are enrolled in the tenant group, a
+    //   `FailedPrecondition` status is returned.
+    rpc DeleteTenantGroup(TenantGroupReference) returns (google.protobuf.Empty);
+}
+
+message CreateTenantRequest {
+    // An opaque value that represents the identity of the user that created
+    // this Tenant. The creator is stored for understandability purposes; it
+    // does not grant any additional permissions.
+    // This property is deprecated and will not be stored in the future.
+    string creator_id = 1 [deprecated = true];
+    // Specify the Tenant's visible name, e.g. "Foobar (production)". The
+    // Tenant's name is visible in Namespace-based interfaces, such as the
+    // Dashboard or the CLI. A visible name is optional.
+    string visible_name = 2;
+    // A set of policies that apply to this Tenant. Some policies are only
+    // settable at creation time, and can't be modified later.
+    repeated TenantPolicy policies = 3;
+    // A string, opaque to Namespace, that identifies an external account
+    // associated with this tenant. Namespace ensures that there is at
+    // most one tenant associated with a given external account ID.
+    // If another tenant with the same external account ID is present in
+    // the system, an error is returned.
+    string external_account_id = 4;
+    // A set of labels that should be attached to the Tenant.
+    repeated namespace.stdlib.Label labels = 5;
+}
+
+message UpdateTenantRequest {
+    // The ID of the Tenant that is the target of a particular call.
+    string tenant_id = 1;
+    // Specify the Tenant's visible name, e.g. "Foobar (production)". The
+    // Tenant's name is visible in Namespace-based interfaces, such as the
+    // Dashboard or the CLI. A visible name is optional.
+    string visible_name = 2;
+    // A set of policies that apply to this Tenant. Some policies are only
+    // settable at creation time, and can't be modified later.
+    repeated TenantPolicy policies = 3;
+    // A set of labels that should be attached to the Tenant.
+    // The tenant's label set will be overwritten with the new set.
+    repeated namespace.stdlib.Label labels = 4;
+}
+
+message UpdatePoliciesRequest {
+    // The ID of the Tenant that is the target of a particular call.
+    string tenant_id = 1;
+    // A set of policies that apply to this Tenant. Some policies are only
+    // settable at creation time, and can't be modified later.
+    repeated TenantPolicy policies = 2;
+    // Only update if revision matches.
+    int64 revision = 3;
+}
+
+message EnsureTenantForExternalAccountRequest {
+    // Specify the Tenant's visible name, e.g. "Foobar (production)". The
+    // Tenant's name is visible in Namespace-based interfaces, such as the
+    // Dashboard or the CLI. A visible name is optional.
+    string visible_name = 2;
+    // A set of policies that apply to this Tenant. Some policies are only
+    // settable at creation time, and can't be modified later.
+    repeated TenantPolicy policies = 3;
+    // A string, opaque to Namespace, that identifies an external account
+    // associated with this tenant. Namespace ensures that there is at
+    // most one tenant associated with a given external account ID.
+    // If another tenant with the same external account ID is present in
+    // the system, it is updated with the new properties.
+    string external_account_id = 1;
+    // A set of labels that should be attached to the Tenant. If the Tenant
+    // already exists, its label set will be overwritten with the new set.
+    repeated namespace.stdlib.Label labels = 4;
+
+    // A set of tenant groups that this tenant is enrolled in.
+    // Tenant groups are identified by name and scoped per Namespace Partner Account.
+    repeated string enrolled_groups = 5;
+}
+
+message DescribePoliciesRequest {}
+
+message DescribePoliciesResponse {
+    repeated TenantPolicy policies = 1;
+    int64                 revision = 2;
+}
+
+message TenantPolicy {
+    // A unique identifier that represents this policy. If none is provided, one
+    // will be generated.
+    string id = 1;
+
+    // The policy being set.
+    //
+    // One of:
+    //
+    // - "namespace.cloud.compute.v1beta.UsagePolicy": the serialized JSON of a
+    //   namespace.cloud.compute.v1beta.UsagePolicy should be used as value.
+    //
+    // More policies are available. Consult with the Namespace team on
+    // additional controls that can be applied per tenant.
+    string policy = 2;
+
+    // The policy-specific value. It may be a string, number, or serialized
+    // message (e.g. JSON).
+    string value = 3;
+
+    // A typed expiration policy. When set, `policy` and `value` are not
+    // required. Setting an ExpirationPolicy with no `expires_at` timestamp
+    // removes a previously configured expiration.
+    ExpirationPolicy expiration_policy = 4;
+
+    // Configures when a tenant should expire. An expired tenant can no longer be
+    // used and will be scheduled for deletion.
+    message ExpirationPolicy {
+        // The point in time at which the tenant expires. If not set (or explicitly
+        // cleared), the tenant does not expire.
+        google.protobuf.Timestamp expires_at = 1;
+    }
+}
+
+message TenantResponse {
+    Tenant tenant = 1;
+}
+
+message Tenant {
+    // The ID of the tenant. Tenant IDs should be treated as opaque by clients.
+    // Although there's structure to them, that structure may change over time.
+    string id = 1;
+    // An opaque value supplied at creation time that represents the identity of
+    // the creator of this tenant.
+    // This property is deprecated and will not be stored in the future.
+    string creator_id = 2 [deprecated = true];
+    // An opaque value supplied at creation time that represents the identity of
+    // the creator of this tenant. There is at most one tenant with a given
+    // external ID (within a single partner account).
+    string external_account_id = 5;
+    // Timestamp of when this tenant was created.
+    google.protobuf.Timestamp created_at = 3;
+    // A human-visible label used as a tenant identifier. E.g. "Foobar
+    // (production)".
+    string visible_name = 4;
+    // Labels attached to the Tenant.
+    repeated namespace.stdlib.Label labels = 6;
+}
+
+message TenantReference {
+    // The ID of the Tenant that is the target of a particular call.
+    string tenant_id = 1;
+}
+
+message ListTenantsRequest {
+    // If specified, limits the number of returned Tenants to be at most
+    // `limit`. The platform may always decide to return fewer Tenants, even if
+    // more exist, and the requested limit is higher.
+    int32 limit = 1;
+
+    // If specified, continues a list operation with pagination, i.e. obtain the
+    // next list of tenants that match previous criteria. If a cursor is
+    // specified, no other parameters except `limit` may be provided.
+    string cursor = 2;
+
+    // If specified, only return tenants that were created by the specified user
+    // id.
+    // This property is deprecated and will not be respected in the future.
+    string creator_id = 3;
+
+    // If specified, returns at most one tenant associated with a given external ID.
+    // See `Tenant.external_account_id` for details.
+    string external_account_id = 4;
+}
+
+message ListTenantsResponse {
+    repeated Tenant tenants = 1;
+
+    // If present, then there are additional tenants that match the original
+    // query, but were not returned in this response. Issue a 2nd List call,
+    // passing in the cursor, to obtain the next set.
+    string cursor = 2;
+}
+
+message IssueTenantClientCertificateRequest {
+    // Which tenant credentials should be produced for.
+    string tenant_id = 1;
+
+    // A integration-specified identifier that represents the user that is
+    // requesting these credentials. The actor identity is embedded into the
+    // resulting client certificate.
+    string actor_id = 2;
+
+    // For how long should the resulting credentials be valid for. If not
+    // specified, a short-lived default is used (e.g 15mins).
+    int64 duration_secs = 3;
+
+    // A set of policies that apply to this tenant client certificate.
+    repeated TenantTokenPolicy policies = 4;
+
+    // Configure the access permissions available with this token.
+    AccessPolicy access = 6;
+
+    // Optional.
+    // If not given, a key pair will be generated and the private key will
+    // be returned in `IssueTenantClientCertificateResponse`.
+    //
+    // If set, this indicates that a key pair has been generated on the client
+    // and a certificate should be issued for this public key.
+    // In that case, this field must contain exactly one PEM "PUBLIC KEY" block.
+    string public_key_pem = 5;
+}
+
+message IssueTenantClientCertificateResponse {
+    // The PEM-encoded client certificate that has been issued. The PEM
+    // container will contain one or more PEM "CERTIFICATE" blocks. If multiple
+    // certificates are returned, they can be used to build a certificate chain
+    // to a server-requested Certification Authority.
+    string client_certificate_pem = 1;
+
+    // This field is only filled if the request did not contain `public_key_pem`.
+    // In that case the API will generate a private key. This field will be a
+    // PEM container with exactly one "PRIVATE KEY" block.
+    string private_key_pem = 2;
+
+    reserved 3;
+}
+
+message ExchangeTenantTokenForClientCertRequest {
+    // The public key for which the certificate should be issued. This must
+    // contain exactly one PEM "PUBLIC KEY" block.
+    string public_key_pem = 1;
+
+    // Optionally restrict the certificate to a subset of the permissions in
+    // the tenant token. The request fails if any permission is not granted by
+    // the token. If empty, the certificate inherits the token's permissions.
+    repeated Permission permissions = 2;
+}
+
+message ExchangeTenantTokenForClientCertResponse {
+    // The PEM-encoded client certificate chain issued for the supplied key.
+    string client_certificate_pem = 1;
+}
+
+message EnsureTenantGroupRequest {
+    // A canonical name for the Tenant group.
+    // Tenant groups are identified by name and scoped per Namespace Partner.
+    string name = 1;
+    // A set of policies that apply to every Tenant in this group. Some policies are only
+    // settable at creation time, and can't be modified later.
+    repeated TenantGroupPolicy policies = 2;
+}
+
+message TenantGroupResponse {
+    string name = 1;
+}
+
+message TenantGroupPolicy {
+    // The policy being set.
+    //
+    // One of:
+    //
+    // - "namespace.cloud.compute.v1beta.UsagePolicy": the serialized JSON of a
+    //   namespace.cloud.compute.v1beta.UsagePolicy should be used as value.
+    //
+    // More policies are available. Consult with the Namespace team on
+    // additional controls that can be applied per tenant.
+    string policy = 1;
+
+    // The policy-specific value. It may be a string, number, or serialized
+    // message (e.g. JSON).
+    string value = 2;
+}
+
+message ListTenantGroupsRequest {
+}
+
+message ListTenantGroupsResponse {
+    repeated TenantGroup tenant_groups = 1;
+
+    message TenantGroup {
+        // A canonical name for the Tenant group.
+        // Tenant groups are identified by name and scoped per Namespace Partner.
+        string name = 1;
+
+        // A set of policies that apply to every Tenant in this group.
+        repeated TenantGroupPolicy policies = 2;
+
+        // The full history of policy revisions, latest first. Each version
+        // entry corresponds to one stored revision of the policy.
+        repeated TenantGroupPolicy versions = 3;
+    }
+}
+
+message TenantGroupReference {
+    // A canonical name for the Tenant group.
+    // Tenant groups are identified by name and scoped per Namespace Partner.
+    string name = 1;
+}
+
+message DescribeTenantGroupResponse {
+    // A canonical name for the Tenant group.
+    // Tenant groups are identified by name and scoped per Namespace Partner.
+    string name = 1;
+
+    // A set of policies that apply to every Tenant in this group.
+    repeated TenantGroupPolicy policies = 2;
+
+    // A list of tenants that are enrolled in this group.
+    repeated string enrolled_tenant_ids = 3;
+
+    // The full history of policy revisions, latest first. Each version
+    // entry corresponds to one stored revision of the policy.
+    repeated TenantGroupPolicy versions = 4;
+}

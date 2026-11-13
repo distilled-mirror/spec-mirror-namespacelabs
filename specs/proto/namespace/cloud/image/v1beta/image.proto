@@ -1,0 +1,215 @@
+syntax = "proto3";
+
+package namespace.cloud.image.v1beta;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/image/v1beta";
+
+// ImageService provides container image blueprint management and building.
+// Blueprints define how container images are built (from a Dockerfile or APT
+// packages) and are built asynchronously by the platform.
+//
+// NOTE: This service is still under development and the API is subject to change.
+//
+// ## Access
+//
+// This service is available at the global endpoint:
+//
+// ```
+// https://global.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls to the ImageService require a *tenant token* passed as a Bearer token
+// as part of each call. These are always required.
+//
+// A *tenant token* identifies both the workspace that the call operates on, but
+// may also constrain the set of actions that the caller may do.
+//
+// A *tenant token* can be obtained using the
+// [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta).
+service ImageService {
+    // Creates a new image blueprint with the specified name and specification.
+    // Blueprint names must be unique within the workspace.
+    //
+    // ### Errors
+    // - If a blueprint with the same name already exists, an `AlreadyExists`
+    //   status is returned.
+    // - If the specification is invalid, an `InvalidArgument` status is returned.
+    rpc CreateBlueprint(CreateBlueprintRequest) returns (CreateBlueprintResponse);
+
+    // Returns all active blueprints in the workspace.
+    rpc ListBlueprints(ListBlueprintsRequest) returns (ListBlueprintsResponse);
+
+    // Removes a blueprint. Existing images built from this blueprint are not
+    // affected.
+    //
+    // ### Errors
+    // - If the blueprint does not exist, a `NotFound` status is returned.
+    rpc RemoveBlueprint(RemoveBlueprintRequest) returns (google.protobuf.Empty);
+
+    // Retrieves a specific blueprint by name or ID, including its current build
+    // status.
+    //
+    // ### Errors
+    // - If the blueprint does not exist, a `NotFound` status is returned.
+    rpc FetchBlueprint(FetchBlueprintRequest) returns (FetchBlueprintResponse);
+
+    // Triggers a new build for the specified blueprint. The build is executed
+    // asynchronously; use FetchBlueprint to poll for the build status.
+    //
+    // ### Errors
+    // - If the blueprint does not exist, a `NotFound` status is returned.
+    rpc Build(BuildRequest) returns (BuildResponse);
+}
+
+message CreateBlueprintRequest {
+    // A unique name for the blueprint within the workspace.
+    string blueprint_name = 1;
+    // The specification that defines how the image is built.
+    BlueprintSpec spec = 2;
+}
+
+message CreateBlueprintResponse {
+    ImageBlueprint blueprint = 1;
+}
+
+message ListBlueprintsRequest {
+    bytes pagination_cursor = 1;
+}
+
+message ListBlueprintsResponse {
+    bytes                   pagination_cursor = 1;
+    repeated ImageBlueprint blueprints        = 2;
+}
+
+message RemoveBlueprintRequest {
+    string blueprint_name = 1;
+}
+
+message FetchBlueprintRequest {
+    string blueprint_name = 1;
+    string blueprint_id   = 2;  // If not provided, the latest blueprint version is used.
+}
+
+message FetchBlueprintResponse {
+    ImageBlueprint blueprint = 1;
+}
+
+message BuildRequest {
+    string blueprint_name = 1;
+    string blueprint_id   = 2;  // If not provided, the latest blueprint version is used.
+    // Optional: the deployment site to build the image at (e.g. "ord", "iad").
+    string site = 3;
+}
+
+message BuildResponse {
+    // The updated blueprint with the new build status.
+    ImageBlueprint blueprint = 1;
+    // The image reference of the built image, if the build completed.
+    string image_ref = 2;
+}
+
+// An image blueprint defines a reproducible recipe for building container images.
+message ImageBlueprint {
+    // The unique identifier of this blueprint version.
+    string id = 1;
+    // The name of this blueprint.
+    string name = 2;
+    // Timestamp of when this blueprint was created (in UTC).
+    google.protobuf.Timestamp created_at = 3;
+    // Timestamp of when this blueprint was replaced by a newer version (in UTC).
+    // Not set if this is the current version.
+    google.protobuf.Timestamp replaced_at = 4;
+    // The specification that defines how the image is built.
+    BlueprintSpec spec = 5;
+    // The ID of the actor who created this blueprint.
+    string creator_id = 7;
+    // Build state per deployment site (e.g. "ord", "iad").
+    map<string, StatePerSite> state = 8;
+    // Internal metadata version, incremented on each update.
+    int64 metadata_version = 9;
+    // The most recent build status across all sites.
+    Status status = 10;
+    // Timestamp of when the status was last updated (in UTC).
+    google.protobuf.Timestamp status_updated_at = 11;
+
+    enum State {
+        STATE_UNKNOWN = 0;
+        // The image has been built and is available for use.
+        STATE_READY = 1;
+        // The blueprint has been created or updated and a build is needed.
+        STATE_NEEDS_BUILDING = 2;
+        // A build is currently in progress.
+        STATE_BUILDING = 3;
+        // The most recent build attempt failed.
+        STATE_FAILED = 4;
+    }
+
+    // Build state for a specific deployment site.
+    message StatePerSite {
+        // The build state at this site.
+        State state = 1;
+        // The compute instance ID used for the build, if applicable.
+        string instance_id = 2;
+        // The built image reference at this site, if available.
+        string image_ref = 3;
+    }
+
+    // Aggregated build status across all sites.
+    message Status {
+        // Timestamp of the last successful build (in UTC).
+        google.protobuf.Timestamp built_at = 1;
+        // The image reference of the last successful build.
+        string image_ref = 2;
+        // Timestamp of the last build attempt (in UTC).
+        google.protobuf.Timestamp last_attempt_at = 3;
+        // The builder reference used for the last build attempt.
+        string builder_ref = 4;
+        // Error message from the last failed build attempt.
+        string error = 5;
+    }
+}
+
+// Defines how an image is built. Exactly one source must be specified.
+message BlueprintSpec {
+    oneof source {
+        // Build the image from a Dockerfile.
+        Dockerfile dockerfile = 1;
+        // Build the image by installing APT packages on a base image.
+        AptBasedImage apt_based_image = 2;
+    }
+
+    message Dockerfile {
+        // The Dockerfile content used to build the image.
+        string content = 1;
+    }
+
+    message AptBasedImage {
+        // The base image to install packages on top of.
+        BaseImageSource base_image = 1;
+        // The list of Ubuntu APT packages to install.
+        repeated string apt_packages = 2;
+    }
+
+    // Defines the base image to use for an APT-based build.
+    message BaseImageSource {
+        oneof source {
+            // A fully qualified container image reference.
+            string image_ref = 1;
+            // A reference to another blueprint to use as the base.
+            BlueprintRef blueprint_ref = 2;
+        }
+    }
+}
+
+// References another image blueprint by name and optional version.
+message BlueprintRef {
+    // The name of the referenced blueprint.
+    string name = 1;
+    // Optional blueprint version ID. If not provided, uses the latest version.
+    string id = 2;
+}

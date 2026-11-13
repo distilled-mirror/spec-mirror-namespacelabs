@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package namespace.cloud.compute.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/compute/v1beta";
+
+import "proto/namespace/cloud/compute/v1beta/limits.proto";
+
+message GetConcurrencyRequest {}
+
+message GetConcurrencyResponse {
+    // Current usage and limits for each concurrency pool.
+    repeated PlatformConcurrency concurrency = 1;
+}
+
+message PlatformConcurrency {
+    string                        name             = 1;  // e.g "Linux"
+    // Platforms covered by this pool, e.g. "linux/amd64". Empty means all enabled platforms.
+    repeated string               platforms        = 2;
+    UsagePolicy.ConcurrencyLimits limits           = 3;
+    ActiveConcurrency             active_concurrency = 4;
+
+    message ActiveConcurrency {
+        int64                     instance_count = 1;
+        int64                     cpu            = 2;
+        int64                     memory_mb      = 3;
+    }
+}

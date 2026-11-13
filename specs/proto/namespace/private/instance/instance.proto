@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package namespace.private.instance.v1beta;
+
+import "google/protobuf/empty.proto";
+
+service InstanceService {
+    rpc AddAttachment(AddAttachmentRequest) returns (google.protobuf.Empty);
+}
+
+message AddAttachmentRequest {
+    BuildAttachment build_attachment = 1;
+}
+
+message BuildAttachment {
+    string build_ref = 1;
+}

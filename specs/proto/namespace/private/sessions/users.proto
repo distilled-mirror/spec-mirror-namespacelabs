@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package namespace.private.sessions.v1beta;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/duration.proto";
+import "proto/namespace/private/sessions/session.proto";
+
+service UserSessionsService {
+    rpc ListSessions(google.protobuf.Empty) returns (ListSessionsResponse);
+    rpc InvalidateSession(InvalidateSessionRequest) returns (google.protobuf.Empty);
+    rpc InvalidateAllSessions(google.protobuf.Empty) returns (InvalidateAllSessionsResponse);
+    rpc IssueTenantTokenFromSession(IssueTenantTokenFromSessionRequest) returns (IssueTenantTokenFromSessionResponse);
+}
+
+message ListSessionsResponse {
+    repeated Session session = 1;
+}
+
+message InvalidateSessionRequest {
+    string session_id = 1;
+}
+
+message InvalidateAllSessionsResponse {
+    repeated string session_id = 1;
+}
+
+message IssueTenantTokenFromSessionRequest {
+    google.protobuf.Duration token_duration = 1;
+}
+
+message IssueTenantTokenFromSessionResponse {
+    string tenant_token = 1;
+}

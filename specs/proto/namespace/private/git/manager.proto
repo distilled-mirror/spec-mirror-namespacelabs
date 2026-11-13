@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package namespace.private.git.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/private/git";
+
+service GitManagerService {
+    rpc EnsureLfsMirror(EnsureLfsMirrorRequest) returns (stream EnsureLfsMirrorResponseChunk);
+    rpc EnsureGitSnapshotService(EnsureGitSnapshotServiceRequest) returns (stream EnsureGitSnapshotServiceResponse);
+}
+
+message EnsureLfsMirrorRequest {
+    // Fully qualified GitHub repository URL, e.g.
+    // https://github.com/namespacelabs/internal.
+    string repository_url = 1;
+}
+
+message EnsureLfsMirrorResponse {
+    // Git LFS URL to configure as lfs.url.
+    string lfs_url = 1;
+    CredentialRequirement credential_requirement = 2;
+}
+
+message EnsureLfsMirrorResponseChunk {
+    EnsureLfsMirrorResponse mirror = 1;
+    Status                  status = 2;
+
+    enum Status {
+        STATUS_UNKNOWN              = 0;
+        STATUS_CREATING             = 1;
+        STATUS_WAITING_FOR_INSTANCE = 2;
+        STATUS_READY                = 3;
+    }
+}
+
+message EnsureGitSnapshotServiceRequest {}
+
+message GitSnapshotServiceEndpoint {
+    // Base URL to use when constructing a GitSnapshotService Connect client.
+    string dial_url = 1;
+    CredentialRequirement credential_requirement = 2;
+}
+
+message EnsureGitSnapshotServiceResponse {
+    GitSnapshotServiceEndpoint service = 1;
+    Status                     status = 2;
+
+    enum Status {
+        STATUS_UNSPECIFIED          = 0;
+        STATUS_CREATING             = 1;
+        STATUS_WAITING_FOR_INSTANCE = 2;
+        STATUS_READY                = 3;
+    }
+}
+
+enum CredentialRequirement {
+    CREDENTIAL_REQUIREMENT_UNSPECIFIED              = 0;
+    CREDENTIAL_REQUIREMENT_NSC_INGRESS_BEARER_TOKEN = 1;
+}

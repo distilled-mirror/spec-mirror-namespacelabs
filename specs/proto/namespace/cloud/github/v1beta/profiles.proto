@@ -1,0 +1,334 @@
+syntax = "proto3";
+
+package namespace.cloud.github.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/github/v1beta";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/cloud/compute/v1beta/compute.proto";
+import "proto/namespace/cloud/iam/v1beta/authz.proto";
+
+// ProfileService manages runner profiles for GitHub Actions.
+// Runner profiles define the configuration for ephemeral runners that execute
+// GitHub Actions workflows, including instance shape, operating system, cache
+// settings, and custom images.
+//
+// ## Access
+//
+// This service is available at the global endpoint:
+// ```
+// https://global.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls require a *tenant token* passed as a Bearer token.
+// See the [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta)
+// for obtaining tokens.
+service ProfileService {
+    // Creates a new runner profile with the specified configuration.
+    // The profile's tag must be unique within the workspace.
+    rpc CreateProfile(CreateProfileRequest) returns (CreateProfileResponse);
+
+    // Updates an existing runner profile. The update can be conditional based
+    // on the current version to prevent concurrent modifications.
+    rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+
+    // Lists all runner profiles in the workspace.
+    rpc ListProfiles(google.protobuf.Empty) returns (ListProfilesResponse);
+
+    // Deletes a runner profile. Active runners using this profile
+    // will continue to run, but no new runners will be created with it.
+    rpc DeleteProfile(DeleteProfileRequest) returns (google.protobuf.Empty);
+
+    // Triggers the rebuild of the custom base image of a runner profile.
+    rpc RebuildProfileImage(RebuildProfileImageRequest) returns (RebuildProfileImageResponse);
+}
+
+// BuilderMode controls how container builds are executed.
+enum BuilderMode {
+    // Default mode with no caching.
+    BUILDER_MODE_UNSPECIFIED = 0;
+
+    // Use remote builder instances for builds.
+    USE_REMOTE_BUILDER = 1;
+
+    // Use local build cache within the runner.
+    USE_LOCAL_CACHE = 2;
+
+    // No caching, builds from scratch each time.
+    NO_CACHING = 3;
+}
+
+// AccessLevel controls which Namespace features the runner workload can use.
+enum AccessLevel {
+    // Defaults to PERMISSIVE.
+    ACCESS_LEVEL_UNSPECIFIED = 0;
+
+    // Allows access to the tenant's default workload permissions.
+    ACCESS_LEVEL_PERMISSIVE = 1;
+
+    // Restricts access to GitHub job related features such as builders, caches,
+    // and the container registry.
+    ACCESS_LEVEL_LIMITED = 2;
+
+    // Disables Namespace feature access for the workload.
+    ACCESS_LEVEL_RESTRICTED = 3;
+
+    ACCESS_LEVEL_CUSTOM = 4;
+}
+
+// RunnerProfileStatus contains runtime status information about a profile.
+message RunnerProfileStatus {
+    // Status of all custom runner images, ordered by version (oldest first).
+    repeated CustomRunnerImage custom_runner_image = 1;
+}
+
+// RunnerProfileWithStatus combines profile specification with its runtime status.
+message RunnerProfileWithStatus {
+    // Unique stable identifier for the profile.
+    string profile_id = 1;
+
+    // Profile specification.
+    RunnerProfileSpec spec = 2;
+
+    // Version number incremented on each update. Used for optimistic concurrency
+    // control.
+    int64 version = 3;
+
+    // Timestamp when the profile was created.
+    google.protobuf.Timestamp created_at = 4;
+
+    // Timestamp when the profile was last updated.
+    google.protobuf.Timestamp updated_at = 5;
+
+    // Runtime status information.
+    RunnerProfileStatus status = 6;
+}
+
+// CacheVolumeSettings configures persistent volumes attached to runners.
+message CacheVolumeSettings {
+    reserved 1;
+    reserved "volume_tag";
+
+    // Total size of the volume in gigabytes.
+    int32 volume_size_gb = 2;
+
+    // Reserved size that cannot be used by the cache, in gigabytes.
+    int32 volume_reserved_size_gb = 3;
+
+    // If true, includes container image cache in this volume.
+    bool bundled_container_cache = 4;
+
+    // If true, includes BuildKit cache in this volume.
+    bool bundled_buildkit_cache = 5;
+
+    // If true, includes git repository mirror in this volume.
+    bool bundled_git_mirror = 6;
+
+    // If true, includes runner tools cache in this volume.
+    bool bundled_runner_tools_cache = 7;
+
+    // If true, includes GitHub Actions cache in this volume.
+    bool bundled_runner_actions_cache = 8;
+
+    // List of branches allowed to write to this cache volume.
+    // If empty, all branches can write.
+    repeated string allow_commit_from_branch = 9;
+}
+
+// UbuntuBaseImageSpec defines Ubuntu APT package customizations for runner images.
+message UbuntuBaseImageSpec {
+    // List of Ubuntu APT packages to install.
+    repeated string apt_package = 1;
+}
+
+// DockerBaseImageSpec defines Dockerfile-based customizations for runner images.
+message DockerBaseImageSpec {
+    // Custom Dockerfile content to run as a layer on top of the base image.
+    string dockerfile_content = 1;
+}
+
+// CustomRunnerImageSpec defines the specification for a custom runner image.
+message CustomRunnerImageSpec {
+    // Ubuntu APT package customizations.
+    UbuntuBaseImageSpec ubuntu_spec = 1;
+
+    // Dockerfile-based customizations.
+    DockerBaseImageSpec docker_spec = 2;
+}
+
+// CustomRunnerImageStatus contains the build and deployment status of a custom image.
+message CustomRunnerImageStatus {
+    // Full image reference (registry path and tag).
+    string image_ref = 1;
+
+    // Current build status.
+    Status status = 2;
+
+    // Error message from the last build failure, if any.
+    string last_build_error = 3;
+
+    // Timestamp when the build started.
+    google.protobuf.Timestamp started_build_at = 4;
+
+    // Timestamp when the build completed successfully.
+    google.protobuf.Timestamp built_at = 5;
+
+    // Timestamp of the last build error.
+    google.protobuf.Timestamp last_error_at = 6;
+
+    // Build reference identifier.
+    string build_ref = 7;
+
+    enum Status {
+        STATUS_UNKNOWN = 0;
+        BUILDING = 1;
+        FAILED = 2;
+        READY = 3;
+    }
+}
+
+// CustomRunnerImage combines custom image spec with its build status.
+message CustomRunnerImage {
+    // Image specification.
+    CustomRunnerImageSpec image_spec = 1;
+
+    // Build and deployment status.
+    CustomRunnerImageStatus image_status = 2;
+}
+
+// RunnerProfileSpec contains the configurable specification for a runner profile.
+message RunnerProfileSpec {
+    // Stable user-configurable alias. Must be unique within the workspace
+    // and can be changed. This is used to reference the profile in GitHub
+    // Actions workflow files.
+    string tag = 1;
+
+    // Human-friendly description of the profile.
+    string description = 2;
+
+    // Operating system label (e.g., "ubuntu-22.04", "ubuntu-24.04").
+    // This determines the base image used for runners.
+    string os = 3;
+
+    // Instance shape defining CPU, memory, and other compute resources.
+    namespace.cloud.compute.v1beta.InstanceShape instance_shape = 4;
+
+    // Cache volume configuration for persistent storage across runner instances.
+    repeated CacheVolumeSettings cache_volume_settings = 5;
+
+    // Builder mode controls how builds are executed.
+    BuilderMode builder_mode = 6;
+
+    // List of experimental features to enable for runners using this profile.
+    repeated string experimental_features = 7;
+
+    // Optional emoji to visually identify the profile in UI.
+    string emoji = 8;
+
+    // Specification for a custom runner image with additional packages or
+    // configuration.
+    CustomRunnerImageSpec custom_runner_image_spec = 9;
+
+    // Network policy for egress restrictions.
+    NetworkPolicy network_policy = 10;
+
+    // Controls which Namespace features the runner workload can access.
+    AccessLevel access_level = 11;
+
+    // Size of the swap file to provision on the runner, in megabytes.
+    int32 swap_size_mb = 12;
+
+    repeated namespace.cloud.iam.v1beta.Permission custom_permissions = 13;
+}
+
+// NetworkPolicy configures network egress restrictions for runners.
+message NetworkPolicy {
+    // Egress policy controlling outbound network access.
+    EgressPolicy egress = 1;
+
+    // List of domains allowed for egress when policy is DOMAIN_ALLOW_LIST.
+    // Must be empty unless egress is DOMAIN_ALLOW_LIST.
+    repeated string egress_domain_allow_list = 2;
+
+    // When true, runs the egress domain allow list in advisory mode: traffic is
+    // not blocked, but egress decisions are still recorded.
+    // Must be false unless egress is DOMAIN_ALLOW_LIST.
+    bool advisory = 3;
+
+    // Tag of the workspace egress policy to apply when policy is TAG.
+    // Must be empty unless egress is TAG.
+    string egress_policy_tag = 4;
+
+    enum EgressPolicy {
+        // Defaults to NONE.
+        EGRESS_POLICY_UNKNOWN = 0;
+
+        // No egress restrictions.
+        EGRESS_POLICY_NONE = 1;
+
+        // Only allow egress to domains in egress_domain_allow_list.
+        // A minimal set of GitHub- and Namespace-owned domains needed to run GitHub Jobs is
+        // always added to the allowlist.
+        // Only supported on Linux runners.
+        EGRESS_POLICY_DOMAIN_ALLOW_LIST = 2;
+
+        // Apply the workspace egress policy identified by egress_policy_tag.
+        EGRESS_POLICY_TAG = 3;
+    }
+}
+
+// CreateProfileRequest creates a new runner profile.
+message CreateProfileRequest {
+    // Profile specification.
+    RunnerProfileSpec spec = 1;
+}
+
+// CreateProfileResponse returns the created profile with status.
+message CreateProfileResponse {
+    // The created profile with runtime status.
+    RunnerProfileWithStatus profile = 1;
+}
+
+// UpdateProfileRequest updates an existing runner profile.
+message UpdateProfileRequest {
+    // Profile ID to update.
+    string profile_id = 1;
+
+    // Updated profile specification.
+    RunnerProfileSpec spec = 2;
+
+    // If set, the update only succeeds if the stored version matches this value.
+    // This provides optimistic concurrency control.
+    int64 update_version = 3;
+}
+
+// UpdateProfileResponse returns the updated profile with status.
+message UpdateProfileResponse {
+    // The updated profile with runtime status.
+    RunnerProfileWithStatus profile = 1;
+}
+
+// ListProfilesResponse returns all profiles in the workspace.
+message ListProfilesResponse {
+    // List of profiles with runtime status.
+    repeated RunnerProfileWithStatus profiles = 1;
+}
+
+// DeleteProfileRequest deletes a runner profile.
+message DeleteProfileRequest {
+    // Profile ID to delete.
+    string profile_id = 1;
+}
+
+// RebuildProfileImageRequest triggers a rebuild of the custom base image for a profile.
+message RebuildProfileImageRequest {
+    string profile_id = 1;
+}
+
+// RebuildProfileImageResponse returns the status of the profile after the build has been triggered.
+message RebuildProfileImageResponse {
+    RunnerProfileStatus status = 1;
+}

@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package namespace.private.git.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/private/git";
+
+service GitSnapshotService {
+  rpc PrepareSnapshot(PrepareSnapshotRequest) returns (stream PrepareSnapshotResponseChunk);
+}
+
+message PrepareSnapshotRequest {
+  // Git repository URL accepted by git fetch, e.g.
+  // https://github.com/namespacelabs/internal.
+  string repository_url = 1;
+
+  // Git ref, tag, branch, or commit-ish to check out.
+  string ref = 2;
+
+  // Desired snapshot representation. Servers use this when supported_kinds is
+  // empty, including for clients that predate representation negotiation.
+  SnapshotKind kind = 3;
+
+  // Additional git refs, tags, branches, or commit-ish values to include in the
+  // local git packs. These do not affect the checkout target.
+  repeated string additional_refs = 5;
+
+  // Controls whether the ref is resolved immediately or may reuse a recent
+  // resolution. RECENT is only valid when ref is HEAD.
+  RefResolution ref_resolution = 6;
+
+  // Representations the client can materialize. When non-empty, the server
+  // selects one and reports it in PrepareSnapshotResponse.kind.
+  repeated SnapshotKind supported_kinds = 7;
+
+  // 0 preserves full history; 1 includes only the requested commits and their
+  // trees. Nonzero depth requires the BARE or COMPLETE representation.
+  int32 depth = 8;
+}
+
+message PrepareSnapshotResponse {
+  // URL from which the SquashFS image can be downloaded. The server supports
+  // HTTP range requests for this URL.
+  string url = 1;
+  int64 size_bytes = 2;
+  string resolved_commit = 3;
+  // Representation selected by the server.
+  SnapshotKind kind = 4;
+  repeated string resolved_additional_commits = 5;
+  string resolved_ref = 6;
+
+  // Smart HTTP Git URL used for CLONE and CLONE_ORIGIN. This may point to the
+  // snapshot service's mirror or to an external origin.
+  string git_url = 7;
+  string git_ref = 8;
+  // Short-lived credentials scoped to git_url. Empty for the snapshot service's mirror.
+  GitHttpCredentials git_http_credentials = 9;
+
+  // Applied history depth. Clients must check this before accepting a shallow
+  // snapshot from servers that may predate depth support.
+  int32 depth = 10;
+}
+
+message GitHttpCredentials {
+  string url_scope = 1;
+  repeated GitHttpHeader headers = 2;
+}
+
+message GitHttpHeader {
+  string name = 1;
+  string value = 2;
+}
+
+message PrepareSnapshotResponseChunk {
+  PrepareSnapshotResponse snapshot = 1;
+  Status status = 2;
+  string message = 3;
+
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_SETTING_UP_REPOSITORY = 1;
+    STATUS_FETCHING_REFERENCE = 2;
+    STATUS_PREPARING_SNAPSHOT = 3;
+    STATUS_UPLOADING_SNAPSHOT = 4;
+    STATUS_READY = 5;
+  }
+}
+
+enum SnapshotKind {
+  SNAPSHOT_KIND_UNSPECIFIED = 0;
+  SNAPSHOT_KIND_BARE = 1;
+  SNAPSHOT_KIND_COMPLETE = 2;
+  SNAPSHOT_KIND_CLONE = 3;
+  // Credential-only origin checkout. git_url and git_ref identify the origin
+  // and requested ref; the client resolves that ref and additional_refs itself.
+  // The server does not populate resolved_commit or resolved_additional_commits.
+  SNAPSHOT_KIND_CLONE_ORIGIN = 4;
+}
+
+enum RefResolution {
+  REF_RESOLUTION_UNSPECIFIED = 0;
+  REF_RESOLUTION_EXACT = 1;
+  REF_RESOLUTION_RECENT = 2;
+}

@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package namespace.cloud.compute.v1beta;
+
+import "proto/namespace/cloud/compute/v1beta/compute.proto";
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/compute/v1beta";
+
+// CommandService allows executing commands in containers running within
+// compute instances.
+//
+// ## Access
+//
+// Like ComputeService, CommandService is regionalized for fault tolerance.
+// Each of the regional API endpoints offers a view into the compute instances
+// running at that location. Reach out to Namespace team at support@namespace.so
+// for a list of available regions.
+//
+// ```
+// https://{region}.compute.namespaceapis.com:443
+// # E.g.:
+// https://eu.compute.namespaceapis.com:443
+// https://us.compute.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls to the CommandService require a *tenant token* or a *workload token*
+// passed as a Bearer token as part of each call. These are always required.
+//
+// A *tenant token* identifies both the workspace that the call operates on, but
+// may also constrain the set of actions that the caller may do.
+//
+// A *workload token* identifies a running instance, and the workspace it is
+// running in. Each running instance has a workload token, which is
+// automatically made available to services running inside the instance.
+//
+// A *tenant token* can be obtained using the
+// [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta).
+service CommandService {
+    // Runs a command in a container within a running instance. Stdout and stderr
+    // are streamed back as individual responses. The final response includes an
+    // ExitStatus with the command's exit code.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    // - If the target container does not exist, a `NotFound` status is returned.
+    rpc RunCommand(RunCommandRequest) returns (stream RunCommandResponse);
+
+    // Runs a command in a container within a running instance and waits for it
+    // to complete. Stdout and stderr are bundled into a single response,
+    // similar to CombinedOutput.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    // - If the target container does not exist, a `NotFound` status is returned.
+    rpc RunCommandSync(RunCommandRequest) returns (RunCommandSyncResponse);
+}
+
+message Command {
+    // The command to execute, e.g. ["ls", "-la"].
+    repeated string command = 1;
+
+    // Optional environment variables to set for the command.
+    repeated EnvironmentVariable env_vars = 2;
+
+    // Optional working directory for the command.
+    string cwd = 3;
+}
+
+message RunCommandRequest {
+    // The ID of instance which this call targets.
+    string instance_id = 1;
+
+    // The name of the container to run the command in.
+    string target_container_name = 2;
+
+    // The command to execute.
+    Command command = 3;
+}
+
+message RunCommandResponse {
+    // The output stream this chunk belongs to.
+    Stream stream = 1;
+
+    // A chunk of output data.
+    bytes data = 2;
+
+    // If set, the command has exited. This is the last message in the stream.
+    ExitStatus exit_status = 3;
+
+    enum Stream {
+        STREAM_UNKNOWN = 0;
+        STDOUT         = 1;
+        STDERR         = 2;
+    }
+
+    message ExitStatus {
+        int32 exit_code = 1;
+    }
+}
+
+message RunCommandSyncResponse {
+    // The combined stdout output.
+    bytes stdout = 1;
+
+    // The combined stderr output.
+    bytes stderr = 2;
+
+    // The exit code of the command.
+    int32 exit_code = 3;
+}

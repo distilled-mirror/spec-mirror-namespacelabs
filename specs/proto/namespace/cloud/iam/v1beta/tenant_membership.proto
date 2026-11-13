@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package namespace.cloud.iam.v1beta;
+
+import "google/protobuf/empty.proto";
+
+// TenantMembershipService provides information about users who belong to a
+// tenant and their effective roles within that tenant.
+//
+// ## Access
+//
+// TenantMembershipService is available over gRPC and HTTP on the following
+// endpoint:
+//
+// ```
+// https://iam.namespaceapis.com:443
+// ```
+//
+// See [the overview](https://buf.build/namespace/cloud) for examples of how to
+// access the API from the console.
+//
+// ## Authentication
+//
+// Calls to TenantMembershipService require a Namespace-issued tenant token
+// passed as a Bearer token in the Authorization header:
+//
+// ```
+// Authorization: Bearer {token}
+// ```
+//
+// The tenant token identifies the tenant whose membership is returned and may
+// constrain the actions available to the caller.
+service TenantMembershipService {
+    // Lists the members of the authenticated tenant.
+    //
+    // ### Authentication
+    // Requires a tenant token with the {"tenant/member", "list"} action permission.
+    rpc ListTenantMembers(ListTenantMembersRequest) returns (ListTenantMembersResponse);
+
+    // Removes a non-owner member from the authenticated tenant.
+    //
+    // ### Authentication
+    // Requires a tenant token with the {"tenant/member", "remove"} action permission.
+    rpc RemoveTenantMember(RemoveTenantMemberRequest) returns (google.protobuf.Empty);
+}
+
+message ListTenantMembersRequest {
+}
+
+message ListTenantMembersResponse {
+    repeated TenantMember members = 1;
+}
+
+message RemoveTenantMemberRequest {
+    // The ID of the user to remove.
+    string user_id = 1;
+}
+
+message TenantMember {
+    // The ID of the user. User IDs should be treated as opaque by clients.
+    string user_id = 1;
+
+    // The user's first name.
+    string first_name = 2;
+
+    // The user's last name.
+    string last_name = 3;
+
+    // The user's email address.
+    string email = 4;
+
+    // The user's role in the tenant.
+    TenantMemberRole role = 5;
+}
+
+enum TenantMemberRole {
+    TENANT_MEMBER_ROLE_UNSPECIFIED = 0;
+    TENANT_MEMBER_ROLE_OWNER       = 1;
+    TENANT_MEMBER_ROLE_EDITOR      = 2;
+    TENANT_MEMBER_ROLE_ADMIN       = 3;
+    TENANT_MEMBER_ROLE_READER      = 4;
+    TENANT_MEMBER_ROLE_ACCOUNTANT  = 5;
+}

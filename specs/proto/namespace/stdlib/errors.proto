@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package namespace.stdlib;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/stdlib";
+
+message StatusError {
+    int32           code    = 1;
+    string          message = 2;
+    repeated Detail details = 3;
+
+    message Detail {
+        string type_url         = 1;
+        string serialized_json  = 2;
+        bytes  serialized_proto = 3;
+    }
+}
+
+message KnownError {
+    string id          = 1;
+    string description = 2;
+}
